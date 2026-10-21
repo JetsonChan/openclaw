@@ -9,7 +9,7 @@ import {
 } from "./runtime-guard.js";
 
 const state = vi.hoisted(() => ({
-  version: "24.16.0",
+  version: "24.22.1",
   error: vi.fn(),
   run: vi.fn(),
   diagnosticLoads: 0,
@@ -65,7 +65,7 @@ function createExitingRuntime() {
 describe("runtime-guard", () => {
   it("validates ordinary CLI runtimes without initializing SQLite worker policy", async () => {
     state.initializeSqlite.mockClear();
-    state.version = "24.16.0";
+    state.version = "24.22.1";
     state.lossless = true;
     await assertSupportedRuntime(createExitingRuntime());
     expect(state.initializeSqlite).not.toHaveBeenCalled();
@@ -89,8 +89,8 @@ describe("runtime-guard", () => {
   });
 
   it.each([
-    ["24.16.0", true, true],
-    ["24.16.0", false, false],
+    ["24.22.1", true, true],
+    ["24.22.1", false, false],
     ["24.15.0+vendor.1", true, true],
     ["24.15.0+vendor.1", false, false],
   ] as const)("gates Node %s with lossless SQLite %s", async (version, lossless, admitted) => {
@@ -222,17 +222,17 @@ describe("runtime-guard", () => {
   });
 
   it("preserves the target package's numeric engine range", () => {
-    const engine = ">=24.16.0 <25 || >=26.1.0";
+    const engine = ">=24.22.1 <25 || >=26.12.1";
     expect(nodeVersionSatisfiesEngine("22.23.2", engine)).toBe(false);
     expect(nodeVersionSatisfiesEngine("22.22.2", engine)).toBe(false);
     expect(nodeVersionSatisfiesEngine("23.11.0", engine)).toBe(false);
     expect(nodeVersionSatisfiesEngine("24.14.1", engine)).toBe(false);
     expect(nodeVersionSatisfiesEngine("24.15.0+vendor.1", engine)).toBe(false);
-    expect(nodeVersionSatisfiesEngine("24.16.0", engine)).toBe(true);
+    expect(nodeVersionSatisfiesEngine("24.22.1", engine)).toBe(true);
     expect(nodeVersionSatisfiesEngine("25.8.1", engine)).toBe(false);
     expect(nodeVersionSatisfiesEngine("25.9.0", engine)).toBe(false);
     expect(nodeVersionSatisfiesEngine("26.0.0", engine)).toBe(false);
-    expect(nodeVersionSatisfiesEngine("26.1.0", engine)).toBe(true);
+    expect(nodeVersionSatisfiesEngine("26.12.1", engine)).toBe(true);
     expect(nodeVersionSatisfiesEngine(null, engine)).toBe(false);
     expect(nodeVersionSatisfiesEngine("unknown", engine)).toBe(false);
   });
@@ -241,11 +241,11 @@ describe("runtime-guard", () => {
     ["22.23.2", false],
     ["23.11.0", false],
     ["24.15.0", false],
-    ["24.16.0", true],
+    ["24.22.1", true],
     ["25.9.0", false],
     ["26.0.0", false],
-    ["26.1.0", true],
-    ["24.16.0+local.1", true],
+    ["26.12.1", true],
+    ["24.22.1+local.1", true],
     ["24.15.0-rc.1", false],
     ["25.9.1-nightly.20260714", false],
     ["24.15", false],
@@ -283,7 +283,7 @@ describe("runtime-guard", () => {
     expect(runtime.error).toHaveBeenCalledOnce();
     expect(runtime.error).toHaveBeenCalledWith(
       [
-        "openclaw requires Node >=24.16.0 <25, or >=26.1.0.",
+        "openclaw requires Node >=24.22.1 <25, or >=26.12.1.",
         "Detected: node 20.0.0 (exec: /usr/bin/node).",
         "PATH searched: /usr/bin",
         "Install Node: https://nodejs.org/en/download",
@@ -301,7 +301,7 @@ describe("runtime-guard", () => {
     };
     const details = {
       kind: "node" as const,
-      version: "24.16.0",
+      version: "24.22.1",
       execPath: "/usr/bin/node",
       pathEnv: "/usr/bin",
       hasNodeSqlite: true,
@@ -425,7 +425,7 @@ describe("runtime-guard", () => {
     expect(runtime.error).toHaveBeenCalledOnce();
     expect(runtime.error).toHaveBeenCalledWith(
       [
-        "openclaw requires Node >=24.16.0 <25, or >=26.1.0.",
+        "openclaw requires Node >=24.22.1 <25, or >=26.12.1.",
         "Detected: unknown runtime (exec: unknown).",
         "PATH searched: (not set)",
         "Install Node: https://nodejs.org/en/download",
@@ -507,7 +507,7 @@ describe("sealed worker runtime", () => {
     },
   );
 
-  it.each(["24.16.0", "26.1.0"])("starts the worker on supported runtime %s", async (version) => {
+  it.each(["24.22.1", "26.12.1"])("starts the worker on supported runtime %s", async (version) => {
     state.version = version;
     state.lossless = true;
     await import("../worker/worker-deploy-entry.js");

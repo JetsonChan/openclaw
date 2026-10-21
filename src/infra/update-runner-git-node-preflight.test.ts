@@ -26,7 +26,7 @@ beforeEach(async () => {
   root = tempDirs.make("candidate-node-");
   await fs.writeFile(
     path.join(root, "package.json"),
-    JSON.stringify({ engines: { node: ">=26.1.0" } }),
+    JSON.stringify({ engines: { node: ">=26.12.1" } }),
   );
   Object.defineProperty(process, "versions", { value: { ...originalVersions, bun: "1.4.3" } });
   vi.spyOn(runtimes, "resolveSystemNodeInfo").mockResolvedValue(null);
@@ -72,7 +72,7 @@ it.each([
     const realNode = resolveTestNodeExecPath();
     await fs.writeFile(
       path.join(root, "package.json"),
-      JSON.stringify({ engines: { node: ">=24.16.0 <25 || >=26.1.0" } }),
+      JSON.stringify({ engines: { node: ">=24.22.1 <25 || >=26.12.1" } }),
     );
     const selectedBin = path.join(root, "selected-bin");
     const shadowBin = path.join(root, "shadow-bin");
@@ -127,7 +127,7 @@ it("qualifies the actual package-tooling Node when the Node host has a custom ex
   Object.defineProperty(process, "execPath", { value: path.resolve("fixture", "node26") });
   await fs.writeFile(
     path.join(root, "package.json"),
-    JSON.stringify({ engines: { node: ">=24.16.0 <25 || >=26.1.0" } }),
+    JSON.stringify({ engines: { node: ">=24.22.1 <25 || >=26.12.1" } }),
   );
   const result = await prepareGitCandidateNodeRuntime(root, { PATH: path.dirname(nodePath) });
   expect(runtimes.resolveNodeRuntimeInfo).toHaveBeenCalledWith(nodePath, expect.any(Object));

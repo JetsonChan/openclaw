@@ -92,7 +92,7 @@ esac
     return createHash(algorithm).update(bytes).digest("hex");
   }
   const hashes = {
-    node: archive("node", "node-v24.21.0-linux-x64.tar.xz", "sha256"),
+    node: archive("node", "node-v24.22.1-linux-x64.tar.xz", "sha256"),
     wrapper: archive("wrapper", "pnpm-12.9.0.tgz", "sha512"),
     native: archive("native", "exe.linux-x64-12.9.0.tgz", "sha512"),
   };
@@ -114,9 +114,9 @@ while [[ $# -gt 0 ]]; do
   shift
 done
 if [[ "$url" == */SHASUMS256.txt ]]; then
-  printf '%s  %s\\n' ${JSON.stringify(hashes.node)} node-v24.21.0-linux-x64.tar.xz > "$output"
+  printf '%s  %s\\n' ${JSON.stringify(hashes.node)} node-v24.22.1-linux-x64.tar.xz > "$output"
 else
-  cp ${JSON.stringify(join(origin, "node-v24.21.0-linux-x64.tar.xz"))} "$output"
+  cp ${JSON.stringify(join(origin, "node-v24.22.1-linux-x64.tar.xz"))} "$output"
 fi
 `,
   );
@@ -255,7 +255,7 @@ describe("scripts/crabbox-untrusted-bootstrap.sh", () => {
       const f = fixture();
       const archive =
         kind === "node"
-          ? "node-v24.21.0-linux-x64.tar.xz"
+          ? "node-v24.22.1-linux-x64.tar.xz"
           : kind === "wrapper"
             ? "pnpm-12.9.0.tgz"
             : "exe.linux-x64-12.9.0.tgz";
@@ -307,7 +307,7 @@ describe("scripts/crabbox-untrusted-bootstrap.sh", () => {
   it("refuses an invalid download after rejecting the image archive", () => {
     const f = fixture();
     for (const directory of [f.image, f.origin]) {
-      writeFileSync(join(directory, "node-v24.21.0-linux-x64.tar.xz"), "invalid");
+      writeFileSync(join(directory, "node-v24.22.1-linux-x64.tar.xz"), "invalid");
     }
     const result = f.run();
     expect(result.status).toBe(1);
