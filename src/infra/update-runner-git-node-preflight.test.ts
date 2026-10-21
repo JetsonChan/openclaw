@@ -4,7 +4,7 @@ import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { useAutoCleanupTempDirTracker } from "../../test/helpers/temp-dir.js";
 import * as runtimes from "../daemon/runtime-paths.js";
 import { runCommandWithTimeout } from "../process/exec.js";
-import { resolveTestNodeExecPath } from "../test-utils/node-process.js";
+import { execNodeEvalSync, resolveTestNodeExecPath } from "../test-utils/node-process.js";
 import * as executables from "./executable-path.js";
 import { prepareGitCandidateNodeRuntime } from "./update-runner-git-node-preflight.js";
 
@@ -15,7 +15,7 @@ const nodePath = path.resolve("fixture", "managed-node", "node");
 const oldNodePath = path.resolve("fixture", "old-node", "node");
 const supported = {
   status: "supported" as const,
-  version: "26.7.0",
+  version: "26.12.1",
   sqliteVersion: "3.53.0",
   nodeSharedSqlite: false,
   sqliteProbe: { available: true, version: "3.53.0", text: true, blob: true, json: true },
@@ -100,7 +100,11 @@ it.each([
     );
     if (runtime === "node") {
       Object.defineProperty(process, "versions", {
-        value: { ...originalVersions, bun: undefined },
+        value: {
+          ...originalVersions,
+          node: execNodeEvalSync("process.stdout.write(process.versions.node)", { timeout: 5000 }),
+          bun: undefined,
+        },
       });
       Object.defineProperty(process, "execPath", { value: path.join(selectedBin, executable) });
     }
