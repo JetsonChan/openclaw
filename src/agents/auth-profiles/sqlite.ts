@@ -9,7 +9,7 @@ import { cloneEnvWithPlatformSemantics } from "../../config/config-env-vars.js";
 import { resolveStateDir } from "../../config/paths.js";
 import { sha256HexPrefixCore } from "../../infra/crypto-digest.js";
 import { assertEngineStoreExecutionAllowed } from "../../infra/database-engine/admission-scope.js";
-import { getDatabaseEngineSelection } from "../../infra/database-engine/context.js";
+import { getDatabaseEngineInput } from "../../infra/database-engine/context.js";
 import { openNodeSqliteDatabase, resolveExistingSqliteFileUri } from "../../infra/node-sqlite.js";
 import type { EngineConnection } from "../../infra/sql-connection.js";
 import { resolveSqliteDatabaseFilePaths } from "../../infra/sqlite-files.js";
@@ -65,6 +65,8 @@ import {
   inspectAuthProfileJsonCell,
   inspectAgentAuthProfileJsonCellReadOnly,
   readAuthProfileJsonCellText,
+  readAuthProfileRows,
+  readAuthProfileRowsReadOnly,
 } from "./sqlite-json.js";
 import {
   acquireAuthProfileReadDatabase,
@@ -72,6 +74,7 @@ import {
   isMissingDatabasePath,
 } from "./sqlite-read-pool.js";
 import type {
+  AuthProfileRowRead,
   AuthProfileStoreOwner,
   PersistedAuthProfileStoreInspection,
   PreparedAuthProfileStoreOwner,
@@ -198,7 +201,7 @@ function resolveAuthProfileDatabaseKind(
 /** Validate selected-agent ownership without requiring a current session schema. */
 export function assertAuthProfileStoreAgentOwner(agentDir: string, agentId: string): void {
   const pathname = resolveAuthProfileDatabasePath(agentDir);
-  if (getDatabaseEngineSelection()?.input) {
+  if (getDatabaseEngineInput("agent")) {
     const opened = openOpenClawAgentDatabaseReadOnly({ agentId, path: pathname });
     if (opened.found) {
       opened.database.close();
@@ -246,40 +249,66 @@ function readSelectedAgentAuthDatabase<T>(
   }
 }
 
+function readAuthProfileDatabaseReadOnly<T>(
+  databaseTarget: Pick<AuthProfileDatabaseTarget, "kind" | "path"> & { env?: NodeJS.ProcessEnv },
+  reader: {
+    read: (db: EngineConnection, kind: AuthProfileDatabaseTarget["kind"]) => T;
+    readNativeAgent: (databasePath: string) => T;
+    unavailable: (inspection: PersistedAuthProfileStoreInspection) => T;
+  },
+): T {
+  if (databaseTarget.kind === "shared-state") {
+    try {
+      return (
+        withExistingOpenClawStateDatabaseReadOnly(({ db }) => reader.read(db, "shared-state"), {
+          path: databaseTarget.path,
+          ...(databaseTarget.env ? { env: databaseTarget.env } : {}),
+        }) ?? reader.unavailable({ status: "missing", reason: "database" })
+      );
+    } catch {
+      return reader.unavailable(
+        isMissingDatabasePath(databaseTarget.path)
+          ? { status: "missing", reason: "database" }
+          : { status: "unreadable" },
+      );
+    }
+  }
+  if (getDatabaseEngineInput("agent")) {
+    try {
+      return (
+        readSelectedAgentAuthDatabase(databaseTarget, (db) => reader.read(db, "agent"))?.value ??
+        reader.unavailable({ status: "missing", reason: "database" })
+      );
+    } catch {
+      return reader.unavailable({ status: "unreadable" });
+    }
+  }
+  return reader.readNativeAgent(databaseTarget.path);
+}
+
 export function inspectAuthProfileJsonCellReadOnly(
   databaseTarget: Pick<AuthProfileDatabaseTarget, "kind" | "path"> & { env?: NodeJS.ProcessEnv },
   target: "store" | "state",
 ): PersistedAuthProfileStoreInspection {
-  if (databaseTarget.kind === "shared-state") {
-    try {
-      return (
-        withExistingOpenClawStateDatabaseReadOnly(
-          ({ db }) => inspectAuthProfileJsonCell(db, target, "shared-state"),
-          { path: databaseTarget.path, ...(databaseTarget.env ? { env: databaseTarget.env } : {}) },
-        ) ?? { status: "missing", reason: "database" }
-      );
-    } catch {
-      return isMissingDatabasePath(databaseTarget.path)
-        ? { status: "missing", reason: "database" }
-        : { status: "unreadable" };
-    }
-  }
-  if (getDatabaseEngineSelection()?.input) {
-    try {
-      return (
-        readSelectedAgentAuthDatabase(databaseTarget, (db) =>
-          inspectAuthProfileJsonCell(db, target, "agent"),
-        )?.value ?? { status: "missing", reason: "database" }
-      );
-    } catch {
-      return { status: "unreadable" };
-    }
-  }
-  return inspectAgentAuthProfileJsonCellReadOnly(
-    databaseTarget.path,
-    target,
-    openSqliteReadOnlyDatabase,
-  );
+  return readAuthProfileDatabaseReadOnly(databaseTarget, {
+    read: (db, kind) => inspectAuthProfileJsonCell(db, target, kind),
+    readNativeAgent: (databasePath) =>
+      inspectAgentAuthProfileJsonCellReadOnly(databasePath, target, openSqliteReadOnlyDatabase),
+    unavailable: (inspection) => inspection,
+  });
+}
+
+export function readPersistedAuthProfileRows(
+  agentDir?: string,
+  env?: NodeJS.ProcessEnv,
+): AuthProfileRowRead {
+  const target = resolveAuthProfileDatabaseOptions(agentDir, env);
+  return readAuthProfileDatabaseReadOnly(target, {
+    read: (db, kind) => readAuthProfileRows(db, target.path, kind),
+    readNativeAgent: (databasePath) =>
+      readAuthProfileRowsReadOnly(databasePath, openSqliteReadOnlyDatabase),
+    unavailable: (inspection) => ({ store: inspection, state: inspection, cacheable: false }),
+  });
 }
 
 /** Doctor retains opaque rotation-state bytes while repairing independently readable credentials. */
@@ -292,7 +321,7 @@ export function readAuthProfileStateJsonTextReadOnly(
       { path: target.path, ...(target.env ? { env: target.env } : {}) },
     );
   }
-  if (getDatabaseEngineSelection()?.input) {
+  if (getDatabaseEngineInput("agent")) {
     const result = readSelectedAgentAuthDatabase(target, (db) =>
       readAuthProfileJsonCellText(db, "state", "agent"),
     );
@@ -642,6 +671,7 @@ export function runAuthProfileWriteTransaction<T>(
           ...(existing
             ? {
                 repairAdmission: {
+                  integrityTables: ["auth_profile_store", "auth_profile_state"],
                   expectedIdentity: existing.identity,
                   assertCurrent: existing.assertCurrent,
                 },

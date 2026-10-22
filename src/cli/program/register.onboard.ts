@@ -64,34 +64,25 @@ function resolveRecommendationAgentOption(command: Command): string | undefined 
   );
 }
 
-function extractCliFlags(cliOption: string): string[] {
-  return cliOption
+// Provider manifests can add auth flags; keep duplicate CLI aliases out of Commander.
+const seenCliFlags = new Set<string>();
+const ONBOARD_AUTH_FLAGS: ReturnType<typeof resolveProviderOnboardAuthFlags> = [];
+for (const flag of resolveProviderOnboardAuthFlags()) {
+  const cliFlags = flag.cliOption
     .split(/[ ,|]+/)
     .filter((part) => part.startsWith("-"))
     .map((part) => {
       const equalsIndex = part.indexOf("=");
       return equalsIndex === -1 ? part : part.slice(0, equalsIndex);
     });
-}
-
-function resolveOnboardAuthFlags() {
-  // Provider manifests can add auth flags; keep duplicate CLI aliases out of Commander.
-  const seenCliFlags = new Set<string>();
-  const flags: ReturnType<typeof resolveProviderOnboardAuthFlags> = [];
-  for (const flag of resolveProviderOnboardAuthFlags()) {
-    const cliFlags = extractCliFlags(flag.cliOption);
-    if (cliFlags.some((cliFlag) => seenCliFlags.has(cliFlag))) {
-      continue;
-    }
-    for (const cliFlag of cliFlags) {
-      seenCliFlags.add(cliFlag);
-    }
-    flags.push(flag);
+  if (cliFlags.some((cliFlag) => seenCliFlags.has(cliFlag))) {
+    continue;
   }
-  return flags;
+  for (const cliFlag of cliFlags) {
+    seenCliFlags.add(cliFlag);
+  }
+  ONBOARD_AUTH_FLAGS.push(flag);
 }
-
-const ONBOARD_AUTH_FLAGS = resolveOnboardAuthFlags();
 
 export function registerOnboardAuthOptions(command: Command): Command {
   command
@@ -124,7 +115,10 @@ export function registerOnboardAuthOptions(command: Command): Command {
       "--custom-no-auth",
       "Use no auth for a custom OpenAI Chat Completions endpoint (sends no Authorization header)",
     )
-    .option("--custom-model-id <id>", "Custom provider model ID")
+    .option(
+      "--custom-model-id <id>",
+      "Custom provider model ID (omit to discover OpenAI-compatible endpoint models)",
+    )
     .option("--custom-provider-id <id>", "Custom provider ID (optional; auto-derived by default)")
     .option(
       "--custom-compatibility <mode>",

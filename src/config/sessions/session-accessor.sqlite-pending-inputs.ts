@@ -18,6 +18,7 @@ import { readOpenClawAgentDatabaseIdentity } from "../../state/openclaw-agent-db
 import type { OpenClawAgentDatabase } from "../../state/openclaw-agent-db.js";
 import { hasSessionPendingInputsSchema } from "../../state/openclaw-agent-pending-inputs-schema.js";
 import { getSessionKysely, type ResolvedTranscriptScope } from "./session-accessor.sqlite-scope.js";
+import { MAX_SESSION_ACTOR_COMPLETIONS } from "./session-actor-hydration.types.js";
 import { runWithSessionActorStorage } from "./session-actor-storage-binding.js";
 import {
   readSessionActorTransactionState,
@@ -286,17 +287,17 @@ export function withSessionPendingInputRelocation<T>(
 /** Registration owns disposition even after operational cancellation; this check performs no SQL. */
 export function hasRegisteredSessionPendingInputOwner(
   databasePath: string,
-  row: Pick<
-    SessionPendingInputRow,
-    "input_id" | "session_key" | "session_id" | "lifecycle_generation"
-  >,
+  // Display reconciliation may hold an older page from before this exact input was recovered.
+  row: Pick<SessionPendingInputRow, "input_id" | "session_key" | "session_id"> &
+    Partial<Pick<SessionPendingInputRow, "lifecycle_generation">>,
 ): boolean {
   const owner = owners.live.get(row.input_id);
   return (
     owner?.workerDatabasePath === databasePath &&
     owner.sessionId === row.session_id &&
     owner.sessionKey === row.session_key &&
-    owner.lifecycleGeneration === row.lifecycle_generation &&
+    (row.lifecycle_generation === undefined ||
+      owner.lifecycleGeneration === row.lifecycle_generation) &&
     (owner.settling || isAgentEventLifecycleGenerationCurrent(owner.lifecycleGeneration))
   );
 }
@@ -310,17 +311,18 @@ export function readSessionInputCompletion(
   scope: SessionInputCompletionScope,
 ): SessionInputCompletion | undefined {
   const actor = readSessionActorTransactionState(database, scope);
-  const row = actor
-    ? actor.completions.get(scope.idempotencyKey)
-    : executeSqliteQueryTakeFirstSync(
-        database.db,
-        getSessionKysely(database.db)
-          .selectFrom("session_input_completions")
-          .selectAll()
-          .where("session_key", "=", scope.sessionKey)
-          .where("session_id", "=", scope.sessionId)
-          .where("idempotency_key", "=", scope.idempotencyKey),
-      );
+  let row = actor?.completions.get(scope.idempotencyKey);
+  if (!row && !actor?.completionsComplete) {
+    row = executeSqliteQueryTakeFirstSync(
+      database.db,
+      getSessionKysely(database.db)
+        .selectFrom("session_input_completions")
+        .selectAll()
+        .where("session_key", "=", scope.sessionKey)
+        .where("session_id", "=", scope.sessionId)
+        .where("idempotency_key", "=", scope.idempotencyKey),
+    );
+  }
   if (!row) {
     return undefined;
   }
@@ -351,6 +353,11 @@ export function writeSessionInputCompletion(
   }
   const succeeded = classifyAgentRunTerminalOutcome(outcome) === "success";
   const completedAt = Date.now();
+  const completionState = {
+    outcome_json: JSON.stringify(outcome),
+    succeeded: succeeded ? 1 : 0,
+    completed_at: completedAt,
+  };
   executeSqliteQuerySync(
     database.db,
     getSessionKysely(database.db)
@@ -361,18 +368,12 @@ export function writeSessionInputCompletion(
         idempotency_key: scope.idempotencyKey,
         run_id: scope.runId,
         request_hash: scope.requestHash,
-        outcome_json: JSON.stringify(outcome),
-        succeeded: succeeded ? 1 : 0,
-        completed_at: completedAt,
+        ...completionState,
       })
       .onConflict((conflict) =>
         conflict
           .columns(["session_id", "idempotency_key"])
-          .doUpdateSet({
-            outcome_json: JSON.stringify(outcome),
-            succeeded: succeeded ? 1 : 0,
-            completed_at: completedAt,
-          })
+          .doUpdateSet(completionState)
           .where("session_input_completions.succeeded", "=", 0),
       ),
   );
@@ -385,10 +386,12 @@ export function writeSessionInputCompletion(
       idempotency_key: scope.idempotencyKey,
       run_id: retained?.run_id ?? scope.runId,
       request_hash: retained?.request_hash ?? scope.requestHash,
-      outcome_json: JSON.stringify(outcome),
-      succeeded: succeeded ? 1 : 0,
-      completed_at: completedAt,
+      ...completionState,
     });
+    if (actor.completions.size > MAX_SESSION_ACTOR_COMPLETIONS) {
+      actor.completions.delete(actor.completions.keys().next().value!);
+      actor.completionsComplete = false;
+    }
   }
   if (isFinalInputCompletion(outcome)) {
     // Handled hooks can finish without appending a user message. The completion
@@ -402,14 +405,16 @@ export function writeSessionInputCompletion(
         .where("idempotency_key", "=", scope.idempotencyKey)
         .where("run_id", "=", scope.runId)
         .where("request_hash", "=", scope.requestHash)
-        .where("lifecycle_generation", "=", scope.lifecycleGeneration),
+        .where("lifecycle_generation", "=", scope.lifecycleGeneration)
+        .where("consumed_event_id", "is", null),
     );
     const pending = actor?.pendingInputs.get(scope.idempotencyKey);
     if (
       pending &&
       pending.run_id === scope.runId &&
       pending.request_hash === scope.requestHash &&
-      pending.lifecycle_generation === scope.lifecycleGeneration
+      pending.lifecycle_generation === scope.lifecycleGeneration &&
+      pending.consumed_event_id === null
     ) {
       if (actor) {
         actor.pendingInputs = writableSessionActorMap(actor.pendingInputs);
@@ -499,13 +504,16 @@ export function resolveSessionPendingInputAppend(
   database: PendingInputDatabase,
   scope: ResolvedTranscriptScope,
   message: unknown,
+  preparedInputs?: ReadonlyMap<string, SessionPendingInputRow>,
 ): SessionPendingInputAppend | undefined {
   const record = asOptionalRecord(message);
   if (record?.role !== "user" || typeof record.idempotencyKey !== "string") {
     return undefined;
   }
   const idempotencyKey = record.idempotencyKey.trim();
-  const row = readSessionPendingInputByKey(database, scope, idempotencyKey);
+  const row = preparedInputs
+    ? preparedInputs.get(idempotencyKey)
+    : readSessionPendingInputByKey(database, scope, idempotencyKey);
   const owner = owners.current.getStore();
   // A bound-session mirror shares source correlation, never its pending custody.
   const ownsInput =
@@ -575,13 +583,11 @@ export function resolveSessionPendingInputAppend(
         }
       : undefined;
   if (owner.sources) {
-    const actor = readSessionActorTransactionState(database, scope);
+    const inputs =
+      preparedInputs ?? readSessionActorTransactionState(database, scope)?.pendingInputs;
     const acceptedByKey = new Map(
-      (actor
-        ? owner.sources.flatMap((source) => {
-            const accepted = actor.pendingInputs.get(source.idempotencyKey);
-            return accepted ? [{ ...accepted }] : [];
-          })
+      (inputs
+        ? owner.sources.flatMap((source) => inputs.get(source.idempotencyKey) ?? [])
         : executeSqliteQuerySync(
             database.db,
             getSessionKysely(database.db)

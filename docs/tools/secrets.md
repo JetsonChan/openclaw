@@ -139,9 +139,10 @@ still requires the normal Gateway sign-in and session access; opening it does
 not answer the request. Never paste the value into chat: a plain-text reply is
 not captured as an answer. Links require an enabled Control
 UI and a configured `gateway.publicOrigin`. Without a usable link, delivery
-reports a visible blocker and cancels the pending request. Open a trusted Control
-UI or native app and retry, or use Settings or the masked CLI locally. Do not
-set up public exposure just to fulfill a credential request.
+reports a visible blocker, returns the same retry guidance to the agent, and
+cancels the pending request. Open an existing trusted Control UI or native app
+and retry, or use Settings or the masked CLI locally. Do not set up public
+exposure just to fulfill a credential request.
 
 Creating a credential request requires `operator.admin` plus the agent's trusted,
 live runtime authority. A run ID or an administrator connection alone is not
