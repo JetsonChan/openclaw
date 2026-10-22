@@ -12,6 +12,7 @@ import {
   closeOpenClawStateDatabaseAsync,
   openOpenClawStateDatabase,
 } from "../state/openclaw-state-db.js";
+import { retireIdleOpenClawStateReadWorkers } from "../state/openclaw-state-read-worker.js";
 import * as retention from "./doctor-capture-retention.js";
 import { findReusableDoctorCapture } from "./doctor-capture-reuse.js";
 import { resolvePrivateSqliteSnapshotStagingRoot } from "./sqlite-private-directory.js";
@@ -19,12 +20,21 @@ import * as snapshots from "./sqlite-snapshot-source.js";
 import * as discoveryWorker from "./update-candidate-state.inspection.js";
 import { resolveUpdateCaptureRoot } from "./update-capture-paths.js";
 import { resolveManagedUpdateLeaseDatabasePath } from "./update-managed-service-handoff-lease.js";
+import { captureRetainedNativeWorkerSource } from "./worker-native-lifecycle.js";
 
-const dirs = useAutoCleanupTempDirTracker(afterEach);
-afterEach(() => {
-  vi.restoreAllMocks();
-  vi.unstubAllEnvs();
-});
+const dirs = useAutoCleanupTempDirTracker((cleanup) =>
+  afterEach(async () => {
+    await closeOpenClawStateDatabaseAsync();
+    // The native source caches its broker across operations. Its socket lives
+    // under this fixture's TMPDIR, so join that owner before removing the root.
+    const source = captureRetainedNativeWorkerSource({ runtimeGeneration: undefined });
+    expect(await retireIdleOpenClawStateReadWorkers(source)).toBe(true);
+    expect(await source.retireIdleBroker()).toBe(true);
+    vi.restoreAllMocks();
+    vi.unstubAllEnvs();
+    cleanup();
+  }),
+);
 
 async function fixture() {
   const root = await fs.realpath(dirs.make("doctor-capture-reuse-"));
