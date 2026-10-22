@@ -941,6 +941,7 @@ export const en: TranslationMap & {
     structuredSecretFile: "Structured value (SecretRef) - edit the config file directly",
     defaultValue: "Default: {value}",
     select: "Select...",
+    required: "Required",
     enumOn: "On",
     enumOff: "Off",
     enumAuto: "Auto",
