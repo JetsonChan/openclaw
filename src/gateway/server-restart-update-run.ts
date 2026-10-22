@@ -3,6 +3,10 @@ import {
   type DeliveryQueueStateContext,
 } from "../infra/delivery-queue-state-context.js";
 import type { RestartSentinelPayload } from "../infra/restart-sentinel.js";
+import {
+  AUTOMATIC_RECOVERY_CLEANUP_STEP,
+  canAutomaticallyCleanUpdateRecovery,
+} from "../infra/update-automatic-cleanup-result.js";
 import { isPendingControlPlaneUpdateRestartSentinel } from "../infra/update-control-plane-sentinel.js";
 import { getUpdateRunAsync as getUpdateRun } from "../infra/update-run-reader.js";
 import {
@@ -140,6 +144,17 @@ export async function finalizeRestartUpdateRun(
         options,
       );
     }
+  }
+  if (
+    updateRun &&
+    canAutomaticallyCleanUpdateRecovery(updateRun) &&
+    !updateRun.steps.some(
+      (step) => step.step === AUTOMATIC_RECOVERY_CLEANUP_STEP && step.status === "completed",
+    )
+  ) {
+    const { cleanupGatewayUpdateRecovery } = await import("./update-automatic-cleanup.js");
+    await cleanupGatewayUpdateRecovery(updateRun.runId, options.env);
+    updateRun = await getUpdateRun(updateRun.runId, options);
   }
   return updateRun;
 }

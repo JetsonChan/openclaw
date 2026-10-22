@@ -640,6 +640,7 @@ export {
   UpdateRunParamsSchema,
   UpdateRunRecordSchema,
   UpdateRunResultSchema,
+  UpdateRecoveryCleanupParamsSchema,
   UpdateRunsGetParamsSchema,
   UpdateRunsGetResultSchema,
   UpdateRunsListParamsSchema,
