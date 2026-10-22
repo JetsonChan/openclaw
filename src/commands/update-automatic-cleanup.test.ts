@@ -353,56 +353,62 @@ it("keeps the triggering update's capture when the wall clock moves backward", a
   expect(result.steps.at(-1)?.advisory?.message).toContain("triggering update");
 });
 
-it("defers original disposal across manifests when historical dependency discovery is unavailable", async () => {
-  const fixture = await createVerifiedRecoveryStore();
-  env = fixture.store.env;
-  stateDir = fixture.store.stateDir;
-  const originals = new Map(
-    fixture.target.completedMoves.map((move) => [
-      move.archivePath,
-      fs.readFileSync(move.archivePath),
-    ]),
-  );
-  const transcript = fixture.target.completedMoves.find((move) => move.kind === "transcript")!;
-  const separate = createSessionSqliteMigrationRun(env, []);
-  separate.manifest.completedAt = fixture.manifest.completedAt;
-  separate.manifest.targets = [
-    {
-      ...structuredClone(fixture.target),
-      plannedMoves: [structuredClone(transcript)],
-      completedMoves: [structuredClone(transcript)],
-    },
-  ];
-  writeSessionSqliteMigrationManifest(separate);
-  fixture.target.plannedMoves = fixture.target.plannedMoves.filter(
-    (move) => move.kind !== "transcript",
-  );
-  fixture.target.completedMoves = fixture.target.completedMoves.filter(
-    (move) => move.kind !== "transcript",
-  );
-  for (const move of [...fixture.target.plannedMoves, ...fixture.target.completedMoves]) {
-    if (move.kind === "legacy-store") {
-      delete move.artifact;
+it.each([true, false])(
+  "defers cross-manifest disposal even for protected historical originals (completed: %s)",
+  async (completed) => {
+    const fixture = await createVerifiedRecoveryStore();
+    env = fixture.store.env;
+    stateDir = fixture.store.stateDir;
+    const originals = new Map(
+      fixture.target.completedMoves.map((move) => [
+        move.archivePath,
+        fs.readFileSync(move.archivePath),
+      ]),
+    );
+    const transcript = fixture.target.completedMoves.find((move) => move.kind === "transcript")!;
+    const separate = createSessionSqliteMigrationRun(env, []);
+    separate.manifest.completedAt = fixture.manifest.completedAt;
+    separate.manifest.targets = [
+      {
+        ...structuredClone(fixture.target),
+        plannedMoves: [structuredClone(transcript)],
+        completedMoves: [structuredClone(transcript)],
+      },
+    ];
+    writeSessionSqliteMigrationManifest(separate);
+    if (!completed) {
+      delete fixture.manifest.completedAt;
     }
-  }
-  writeSessionSqliteMigrationManifest({
-    manifestPath: fixture.manifestPath,
-    manifest: fixture.manifest,
-  });
-  const backup = await migrationOriginal();
-  const first = start(now - 120_000);
-  const oldCapture = capture(first);
-  finishUpdateRun(first, { status: "succeeded" }, { env });
-  const second = start(now + 60_000);
-  await complete(second, now + 61_000);
-  for (const [file, contents] of originals) {
-    expect(fs.existsSync(file), file).toBe(true);
-    expect(fs.readFileSync(file)).toEqual(contents);
-  }
-  expect(fs.existsSync(backup)).toBe(true);
-  // Capture eligibility is independent of deferred session-original dependencies.
-  expect(fs.existsSync(oldCapture)).toBe(false);
-});
+    fixture.target.plannedMoves = fixture.target.plannedMoves.filter(
+      (move) => move.kind !== "transcript",
+    );
+    fixture.target.completedMoves = fixture.target.completedMoves.filter(
+      (move) => move.kind !== "transcript",
+    );
+    for (const move of [...fixture.target.plannedMoves, ...fixture.target.completedMoves]) {
+      if (move.kind === "legacy-store") {
+        delete move.artifact;
+      }
+    }
+    writeSessionSqliteMigrationManifest({
+      manifestPath: fixture.manifestPath,
+      manifest: fixture.manifest,
+    });
+    const backup = await migrationOriginal();
+    const first = start(now - 120_000);
+    const oldCapture = capture(first);
+    finishUpdateRun(first, { status: "succeeded" }, { env });
+    const second = start(now + 60_000);
+    await complete(second, now + 61_000);
+    for (const [file, contents] of originals) {
+      expect(fs.existsSync(file), file).toBe(true);
+      expect(fs.readFileSync(file)).toEqual(contents);
+    }
+    expect(fs.existsSync(backup)).toBe(true);
+    // Capture eligibility is independent of deferred session-original dependencies.
+    expect(fs.existsSync(oldCapture)).toBe(false);
+  },
+);
 
 it("keeps Gateway completion warnings visible when cleanup diagnostics cannot be persisted", async () => {
   const first = start(now - 120_000);

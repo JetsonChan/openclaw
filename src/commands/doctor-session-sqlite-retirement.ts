@@ -236,9 +236,11 @@ export async function retireOwnedSessionSqliteRecovery(
       item.kind !== "update-capture" &&
       (item.outcome === "candidate" || item.outcome === "verification-required"),
   );
+  // Unfinished/blocked historical originals may already be protected. Their
+  // retained references still have unknown dependencies when proof is absent.
   const deferOriginalDisposal =
     params.verifyHistorical === false &&
-    originals.some((item) => item.outcome === "verification-required");
+    report.artifacts.some((item) => references.get(item.path)?.some((ref) => !ref.move.artifact));
   for (const [index, item] of originals.entries()) {
     params.onProgress?.({
       phase: "verifying",
