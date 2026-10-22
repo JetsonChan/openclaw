@@ -171,7 +171,10 @@ verifying every retained file and comparing the complete current config/includes
 database ownership and discovery, declared plugin resources, directory contents,
 links, missing paths, permissions, and file digests. Timestamps alone never prove
 that the source is unchanged. SQLite reuse requires exact consolidated bytes and
-no nonempty WAL or rollback journal. PostgreSQL, unknown plugin coverage, incomplete
+no nonempty WAL or rollback journal. Doctor uses the same private snapshot producer
+as fresh capture and compares each image's complete digest, including normalized
+WAL-mode headers; it never ignores header fields or compares only rows. The temporary
+images are removed after comparison. PostgreSQL, unknown plugin coverage, incomplete
 inventories, and failed comparisons fall back to the existing fresh-capture path.
 Large payloads are streamed with a size-aware comparison allowance; an exhausted
 comparison budget is not an update failure. `--full-integrity-check` takes a fresh

@@ -479,7 +479,9 @@ Standalone Doctor keeps its best-effort pre-repair capture boundary. It reuses
 its newest sealed standalone copy only when the retained payloads and the complete
 current config, database, and declared plugin-resource inventory match exactly.
 Changed or unverifiable sources take a fresh copy; an incomplete comparison never
-counts as verified equality. `--full-integrity-check` still takes a fresh capture.
+counts as verified equality. Healthy schema bookkeeping and plugin repair planning
+leave unchanged state untouched, so consecutive healthy repair runs can reuse one
+copy. `--full-integrity-check` still takes a fresh capture.
 This does not turn repair discovery into a read-only pass: a Doctor invocation can
 still take a copy even when it ultimately reports no repairs.
 Candidate validation uses disposable rehearsal state and defers plugins whose

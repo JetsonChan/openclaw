@@ -271,7 +271,7 @@ it("reuses large unchanged originals instead of falling back because of their by
   expect(await f.captures()).toEqual(first);
 });
 
-it.each(["selection", "discovery"] as const)(
+it.each(["selection", "discovery", "comparison"] as const)(
   "cancels large shared-database reuse during %s and settles private work before cleanup",
   async (phase) => {
     const f = await fixture();
@@ -279,12 +279,23 @@ it.each(["selection", "discovery"] as const)(
     await closeOpenClawStateDatabaseAsync();
     {
       using database = new DatabaseSync(shared);
+      // A WAL-mode main file needs private normalization to the retained image
+      // format even after checkpoint, which exercises the comparison worker.
+      if (phase === "comparison") {
+        database.exec("PRAGMA journal_mode=WAL");
+      }
       database.exec(
         "CREATE TABLE doctor_capture_fixture(payload BLOB); INSERT INTO doctor_capture_fixture VALUES(zeroblob(68157440));",
       );
     }
     expect((await f.capture()).warnings).toEqual([]);
     const originals = await f.captures();
+    if (phase === "comparison") {
+      expect((await f.capture()).warnings).toEqual([]);
+      expect(await f.captures(), "large WAL-mode sources reuse the exact normalized image").toEqual(
+        originals,
+      );
+    }
     const controller = new AbortController();
     const cancellation = new Error("cancel large shared-state comparison");
     const scratchRoot = resolvePrivateSqliteSnapshotStagingRoot();
@@ -319,7 +330,8 @@ it.each(["selection", "discovery"] as const)(
           ...params,
           onProgress: (progress) => {
             params.onProgress?.(progress);
-            if (params.input.mode === "discover" && progress.path === shared) {
+            const mode = phase === "comparison" ? "database-backup" : "discover";
+            if (params.input.mode === mode && progress.path === shared) {
               staging = params.stagingRoot;
               observedProgress = true;
               controller.abort(cancellation);

@@ -15,13 +15,7 @@ import {
   withArtifactPreservingStateReads,
   withOpenClawStateDatabaseReadSnapshot,
 } from "../state/openclaw-state-db-readonly.js";
-import {
-  getOpenClawDatabaseMaintenanceScope,
-  maintenanceOwnerHasSourceCustody,
-  maintenanceOwnerMayCopySourcesInProcess,
-} from "../state/openclaw-state-maintenance-context.js";
 import { resolveBackupConfigCapture } from "./backup-config-capture.js";
-import { resolvePathViaExistingAncestorSync } from "./boundary-path.js";
 import { sha256Hex } from "./crypto-digest.js";
 import { resolveDatabaseFamilyEngines } from "./database-engine/registry.js";
 import { sha256File } from "./directory-durability.js";
@@ -33,20 +27,9 @@ import { SQLITE_SIDECAR_SUFFIXES } from "./sqlite-files.js";
 import { resolvePrivateSqliteSnapshotStagingRoot } from "./sqlite-private-directory.js";
 import { resolveSqliteInspectionBudget } from "./sqlite-readonly-worker.js";
 import { createSqliteSnapshotStagingDirectory } from "./sqlite-snapshot-staging.js";
-import {
-  parseUpdateStateInspectionWorker,
-  runUpdateStateInspectionWorker,
-} from "./update-candidate-state.inspection.js";
-import {
-  discoverUpdateStateSchemaInspectionInProcess,
-  UpdateStateSchemaInspectionPlanSchema,
-} from "./update-candidate-state.js";
 import { withStateInspectionCleanup } from "./update-candidate-state.process.js";
-import {
-  readUpdateStateDatabaseSizes,
-  readUpdateStateDatabaseSizesInProcess,
-} from "./update-candidate-state.sizes.js";
 import { resolveUpdateCaptureRoot } from "./update-capture-paths.js";
+import { createUpdateDatabaseBackup } from "./update-database-backup.js";
 import { withVerifiedUpdateRecoveryBackup } from "./update-recovery-backup-reader.js";
 import type { UpdateRecoveryBaselineRef } from "./update-recovery-baseline-capture.js";
 import { canonicalEntryPath } from "./update-recovery-path.js";
@@ -234,63 +217,46 @@ async function compareCurrentSources(
 
   // Rediscovery includes configured, on-disk, registered, and retained plugin
   // databases. Reading only yesterday's roots would miss a newly created store.
+  const databaseSourceStats = new Map<string, BigIntStats | undefined>();
+  for (const entry of manifest.entries) {
+    if (entry.kind === "file" && entry.sqlite) {
+      databaseSourceStats.set(
+        entry.sourcePath,
+        await fs.lstat(entry.sourcePath, { bigint: true }).catch(ignoreMissingPath),
+      );
+    }
+  }
   const stagingRoot = await createSqliteSnapshotStagingDirectory(
     resolvePrivateSqliteSnapshotStagingRoot(params.env),
     false,
     params.signal,
   );
-  const inventory = await withStateInspectionCleanup(stagingRoot, async () => {
-    const input = {
+  const sqliteImages = await withStateInspectionCleanup(stagingRoot, () =>
+    createUpdateDatabaseBackup({
+      backupRoot: path.join(stagingRoot, "comparison"),
       stateDir: params.stateDir,
       config: configuration.snapshot.sourceConfig,
       env: params.env,
-      stagingRoot,
-      preserveSourceArtifacts: true,
-    };
-    const shared = path.join(params.stateDir, "state", "openclaw.sqlite");
-    const scope = getOpenClawDatabaseMaintenanceScope();
-    // Use the same custody/size policy as fresh capture. A large source copy
-    // must not block Doctor's signal handling while it owns the stopped service.
-    if (maintenanceOwnerMayCopySourcesInProcess(scope, shared)) {
-      return discoverUpdateStateSchemaInspectionInProcess(input);
-    }
-    const worker = {
-      nodeRunner: process.execPath,
-      sourceEnv: params.env,
-      stagingRoot,
       signal: params.signal,
-    };
-    return parseUpdateStateInspectionWorker(
-      await runUpdateStateInspectionWorker({
-        ...worker,
-        input: { ...input, mode: "discover" },
-        databases: maintenanceOwnerHasSourceCustody(scope, shared)
-          ? await readUpdateStateDatabaseSizesInProcess([shared], params.signal)
-          : await readUpdateStateDatabaseSizes([shared], worker),
-        retryAdvice: false,
-      }),
-      UpdateStateSchemaInspectionPlanSchema,
-    );
-  });
+      acquisition: { mode: "maintenance-owner" },
+      purpose: "original-state",
+      preserveSourceArtifacts: true,
+      integrityCheck: "quick",
+      additionalPaths: [...resources].filter(([, kind]) => kind === "sqlite").map(([file]) => file),
+      additionalFiles: manifest.entries.flatMap((entry) =>
+        entry.kind === "file" && !configPaths.has(entry.sourcePath) ? [entry.sourcePath] : [],
+      ),
+      retryAdvice: false,
+    }),
+  );
   check();
   const roots = new Set(resources.keys());
-  const databasePaths = new Set<string>();
-  const owners = new Map<string, NonNullable<UpdateRecoveryBackupManifest["databases"]>[number]>();
-  for (const [, database] of inventory.files) {
-    for (const spelling of database.spellings) {
-      const canonical = resolvePathViaExistingAncestorSync(spelling);
-      databasePaths.add(canonicalEntryPath(spelling));
-      databasePaths.add(canonical);
-      for (const owner of database.owners ?? []) {
-        const entry = { path: canonical, ...owner };
-        owners.set(JSON.stringify(entry), entry);
-      }
-    }
-  }
-  const currentOwners = [...owners]
-    .toSorted(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))
-    .map(([, owner]) => owner);
-  if (!isDeepStrictEqual(currentOwners, manifest.databases)) {
+  const databasePaths = new Set([
+    ...sqliteImages.sourcePaths.map(canonicalEntryPath),
+    ...sqliteImages.databases.map((file) => file.path),
+    ...sqliteImages.missingPaths,
+  ]);
+  if (!isDeepStrictEqual(sqliteImages.databaseOwners, manifest.databases)) {
     throw changed();
   }
   const entries = new Map(manifest.entries.map((entry) => [entry.sourcePath, entry]));
@@ -303,6 +269,10 @@ async function compareCurrentSources(
   const sidecars = new Set(
     [...sqlitePaths].flatMap((file) => SQLITE_SIDECAR_SUFFIXES.map((suffix) => file + suffix)),
   );
+  const matchesSqliteImage = (pathname: string, size: number, digest: string) => {
+    const image = sqliteImages.databases.find((file) => file.path === pathname);
+    return image?.sizeBytes === size && image.sha256 === digest;
+  };
   const observed = new Map<string, BigIntStats | undefined>();
   const inspect = async (pathname: string, declaredKind?: ResourceKind): Promise<void> => {
     check();
@@ -375,6 +345,15 @@ async function compareCurrentSources(
     }
     if (entry.sqlite) {
       roots.add(pathname);
+      const beforeImage = databaseSourceStats.get(pathname);
+      if (
+        !beforeImage ||
+        !sameFileMutationFingerprint(beforeImage, stat) ||
+        !matchesSqliteImage(pathname, entry.size, entry.sha256)
+      ) {
+        throw changed();
+      }
+      return;
     }
     const source = await (
       await safeRoot(path.dirname(pathname))
@@ -411,8 +390,10 @@ async function compareCurrentSources(
   }
   await config.revalidate();
   plugins.assertCurrent();
-  // Captures consolidate SQLite, so byte equality of the main file is useful
-  // only with no durable sidecar content. SHM is a disposable index, not data.
+  // Compare exactly the same consolidated image format used by capture. WAL
+  // mode changes header bytes during private normalization even without data
+  // changes; never mask those bytes or compare only logical rows. Still reject
+  // durable sidecar content. SHM is a disposable index, not data.
   for (const pathname of sqlitePaths) {
     for (const suffix of ["-wal", "-journal"]) {
       const stat = await fs.lstat(pathname + suffix).catch(ignoreMissingPath);
