@@ -76,7 +76,8 @@ export async function cleanupCompletedUpdateRecovery(
       (item) =>
         ["blocked", "failed", "candidate", "verification-required"].includes(item.outcome) ||
         item.reason === "unreadable-update-history" ||
-        item.reason === "historical-manifest-without-import-proof",
+        item.reason === "historical-manifest-without-import-proof" ||
+        item.reason === "historical-recovery-dependencies-unverified",
     );
     const summary = `Recovery cleanup removed ${report.totals.removedFiles} files (${report.totals.removedBytes} logical bytes); protected recovery artifacts were retained.`;
     return {

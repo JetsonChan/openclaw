@@ -19,7 +19,7 @@ import {
   renderUpdateRunReport,
   updateRunReportInputFromResult,
 } from "../../infra/update-run-report.js";
-import { isFailedUpdateStep, updateRunStepsFromResultStep } from "../../infra/update-run-step.js";
+import { isFailedUpdateStep, projectUpdateRunResultSteps } from "../../infra/update-run-step.js";
 import type { UpdateRunResult, UpdateStepProgress } from "../../infra/update-runner-types.js";
 import type { UpdateStepResult } from "../../infra/update-step-result.js";
 import { defaultRuntime } from "../../runtime.js";
@@ -329,19 +329,7 @@ export async function prepareResult(
     const reportedResult = additionalSteps.length
       ? { ...result, steps: [...result.steps, ...additionalSteps] }
       : result;
-    const reportedRun =
-      run && additionalSteps.length
-        ? {
-            ...run,
-            steps: [
-              ...new Map(
-                [...run.steps, ...additionalSteps.flatMap(updateRunStepsFromResultStep)].map(
-                  (step) => [step.step, step],
-                ),
-              ).values(),
-            ],
-          }
-        : run;
+    const reportedRun = run ? projectUpdateRunResultSteps(run, additionalSteps) : undefined;
     const outputReport = additionalSteps.length
       ? renderUpdateRunReport(updateRunReportInputFromResult(reportedResult, reportedRun), {
           ...reportHints,

@@ -7,11 +7,16 @@ import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { useAutoCleanupTempDirTracker } from "../../test/helpers/temp-dir.js";
 import { automaticallyCleanUpdateRecovery } from "../cli/update-cli/automatic-cleanup.js";
 import { prepareUpdateCommandTerminalResult } from "../cli/update-cli/update-command-terminal.js";
+import { finalizeRestartUpdateRun } from "../gateway/server-restart-update-run.js";
 import { cleanupGatewayUpdateRecovery } from "../gateway/update-automatic-cleanup.js";
 import { readGatewayLockProcessNamespace } from "../infra/gateway-lock-payload.js";
 import { acquireGatewayLock } from "../infra/gateway-lock.js";
 import { acquireGatewayStateOwner } from "../infra/gateway-state-owner.js";
-import { writeSessionSqliteMigrationManifest } from "../infra/session-sqlite-migration-manifest.js";
+import {
+  createSessionSqliteMigrationRun,
+  resolveSessionSqliteMigrationRunsDir,
+  writeSessionSqliteMigrationManifest,
+} from "../infra/session-sqlite-migration-manifest.js";
 import { resolveUpdateCaptureRoot } from "../infra/update-capture-paths.js";
 import {
   UPDATE_CAPTURE_PRIVACY_MARKER,
@@ -20,6 +25,7 @@ import {
 import { createRetainedUpdateRecovery } from "../infra/update-retained-recovery.test-support.js";
 import { createUpdateRun, finishUpdateRun, getUpdateRun } from "../infra/update-run-ledger.js";
 import type { UpdateRunRecord } from "../infra/update-run-record.js";
+import * as updateRunWrites from "../infra/update-run-write.async.js";
 import type { UpdateRunResult } from "../infra/update-runner-types.js";
 import { defaultRuntime } from "../runtime.js";
 import { closeOpenClawStateDatabaseAsync } from "../state/openclaw-state-db.js";
@@ -127,12 +133,7 @@ async function complete(runId: string, at: number, json = true) {
   return result;
 }
 
-it("retires the previous successful generation and migration originals, but retains current and protected recovery", async () => {
-  const failed = start(now - 240_000);
-  finishUpdateRun(failed, { status: "failed" }, { env });
-  const failedCapture = capture(failed);
-  const first = start(now - 120_000);
-  const firstCapture = capture(first);
+async function migrationOriginal() {
   await closeOpenClawStateDatabaseAsync();
   const source = resolveOpenClawStateSqlitePath(env);
   const backupId = randomUUID();
@@ -148,6 +149,16 @@ it("retires the previous successful generation and migration originals, but reta
       completeDoctorMigrationBackups(env, [source]);
     },
   });
+  return backup;
+}
+
+it("retires the previous successful generation and migration originals, but retains current and protected recovery", async () => {
+  const failed = start(now - 240_000);
+  finishUpdateRun(failed, { status: "failed" }, { env });
+  const failedCapture = capture(failed);
+  const first = start(now - 120_000);
+  const firstCapture = capture(first);
+  const backup = await migrationOriginal();
   await complete(first, now + 1_000);
   expect(fs.existsSync(firstCapture)).toBe(true);
   expect(fs.existsSync(backup)).toBe(true);
@@ -340,4 +351,106 @@ it("keeps the triggering update's capture when the wall clock moves backward", a
   const result = await complete(runId, now);
   expect(fs.existsSync(current)).toBe(true);
   expect(result.steps.at(-1)?.advisory?.message).toContain("triggering update");
+});
+
+it("defers original disposal across manifests when historical dependency discovery is unavailable", async () => {
+  const fixture = await createVerifiedRecoveryStore();
+  env = fixture.store.env;
+  stateDir = fixture.store.stateDir;
+  const originals = new Map(
+    fixture.target.completedMoves.map((move) => [
+      move.archivePath,
+      fs.readFileSync(move.archivePath),
+    ]),
+  );
+  const transcript = fixture.target.completedMoves.find((move) => move.kind === "transcript")!;
+  const separate = createSessionSqliteMigrationRun(env, []);
+  separate.manifest.completedAt = fixture.manifest.completedAt;
+  separate.manifest.targets = [
+    {
+      ...structuredClone(fixture.target),
+      plannedMoves: [structuredClone(transcript)],
+      completedMoves: [structuredClone(transcript)],
+    },
+  ];
+  writeSessionSqliteMigrationManifest(separate);
+  fixture.target.plannedMoves = fixture.target.plannedMoves.filter(
+    (move) => move.kind !== "transcript",
+  );
+  fixture.target.completedMoves = fixture.target.completedMoves.filter(
+    (move) => move.kind !== "transcript",
+  );
+  for (const move of [...fixture.target.plannedMoves, ...fixture.target.completedMoves]) {
+    if (move.kind === "legacy-store") {
+      delete move.artifact;
+    }
+  }
+  writeSessionSqliteMigrationManifest({
+    manifestPath: fixture.manifestPath,
+    manifest: fixture.manifest,
+  });
+  const backup = await migrationOriginal();
+  const first = start(now - 120_000);
+  const oldCapture = capture(first);
+  finishUpdateRun(first, { status: "succeeded" }, { env });
+  const second = start(now + 60_000);
+  await complete(second, now + 61_000);
+  for (const [file, contents] of originals) {
+    expect(fs.existsSync(file), file).toBe(true);
+    expect(fs.readFileSync(file)).toEqual(contents);
+  }
+  expect(fs.existsSync(backup)).toBe(true);
+  // Capture eligibility is independent of deferred session-original dependencies.
+  expect(fs.existsSync(oldCapture)).toBe(false);
+});
+
+it("keeps Gateway completion warnings visible when cleanup diagnostics cannot be persisted", async () => {
+  const first = start(now - 120_000);
+  const oldCapture = capture(first);
+  finishUpdateRun(first, { status: "succeeded" }, { env });
+  const second = start(now + 60_000);
+  const current = capture(second);
+  {
+    using clock = vi.spyOn(Date, "now");
+    clock.mockReturnValue(now + 61_000);
+    finishUpdateRun(second, { status: "succeeded" }, { env });
+  }
+  const manifests = resolveSessionSqliteMigrationRunsDir(env);
+  fs.mkdirSync(manifests, { recursive: true });
+  fs.writeFileSync(path.join(manifests, "unreadable.json"), "invalid recovery metadata");
+  await closeOpenClawStateDatabaseAsync();
+  const lock = await acquireGatewayLock({ env, role: "gateway", allowInTests: true });
+  expect(lock).toBeTruthy();
+  using recordFailure = vi.spyOn(updateRunWrites, "recordUpdateRunStepAsync");
+  recordFailure.mockRejectedValue(new Error("receipt write unavailable"));
+  try {
+    const completed = await finalizeRestartUpdateRun({
+      kind: "update",
+      status: "ok",
+      ts: now,
+      stats: { runId: second },
+    });
+    expect(completed?.status).toBe("succeeded");
+    expect(completed?.steps).toContainEqual(
+      expect.objectContaining({
+        step: "warning:recovery-artifact-cleanup",
+        detail: expect.stringContaining("receipt write unavailable"),
+      }),
+    );
+    expect(completed?.steps).toContainEqual(
+      expect.objectContaining({
+        step: "warning:recovery-artifact-cleanup",
+        detail: expect.stringContaining("unreadable-manifest"),
+      }),
+    );
+    expect(
+      getUpdateRun(second, { env })?.steps.some(
+        (step) => step.step === "warning:recovery-artifact-cleanup",
+      ),
+    ).toBe(false);
+    expect(fs.existsSync(oldCapture)).toBe(false);
+    expect(fs.existsSync(current)).toBe(true);
+  } finally {
+    await lock?.release();
+  }
 });

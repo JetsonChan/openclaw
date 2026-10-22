@@ -952,6 +952,9 @@ recovery, unresolved failed or rolled-back captures, orphaned/unmanifested copie
 and blocked artifacts remain. Standalone Doctor captures keep their existing
 newest-three/30-day policy, always retaining the newest sealed capture. Historical
 originals requiring additional import verification are left for manual cleanup.
+When that verification is deferred, migration originals are retained together:
+a historical index may reference an original in another manifest. Independently
+eligible update and Doctor captures can still be retired.
 There is no age-only expiration of update captures or migration originals.
 
 Retirement is best effort. A partial removal, verification/resource limit, or

@@ -5,15 +5,18 @@ import {
 import type { RestartSentinelPayload } from "../infra/restart-sentinel.js";
 import {
   AUTOMATIC_RECOVERY_CLEANUP_STEP,
+  automaticRecoveryCleanupWarning,
   canAutomaticallyCleanUpdateRecovery,
 } from "../infra/update-automatic-cleanup-result.js";
 import { isPendingControlPlaneUpdateRestartSentinel } from "../infra/update-control-plane-sentinel.js";
 import { getUpdateRunAsync as getUpdateRun } from "../infra/update-run-reader.js";
+import { projectUpdateRunResultSteps } from "../infra/update-run-step.js";
 import {
   finishUpdateRunAsync as finishUpdateRun,
   recordUpdateRunPhaseAsync as recordUpdateRunPhase,
   recordUpdateRunVerificationAsync as recordUpdateRunVerification,
 } from "../infra/update-run-write.async.js";
+import type { UpdateStepResult } from "../infra/update-step-result.js";
 import { getActivePluginRegistry } from "../plugins/runtime.js";
 import { resolveRuntimeServiceBuildId, resolveRuntimeServiceVersion } from "../version.js";
 
@@ -146,15 +149,25 @@ export async function finalizeRestartUpdateRun(
     }
   }
   if (
+    !pendingExpired &&
     updateRun &&
     canAutomaticallyCleanUpdateRecovery(updateRun) &&
     !updateRun.steps.some(
       (step) => step.step === AUTOMATIC_RECOVERY_CLEANUP_STEP && step.status === "completed",
     )
   ) {
-    const { cleanupGatewayUpdateRecovery } = await import("./update-automatic-cleanup.js");
-    await cleanupGatewayUpdateRecovery(updateRun.runId, options.env);
-    updateRun = await getUpdateRun(updateRun.runId, options);
+    let cleanup: UpdateStepResult | undefined;
+    try {
+      const { cleanupGatewayUpdateRecovery } = await import("./update-automatic-cleanup.js");
+      cleanup = await cleanupGatewayUpdateRecovery(updateRun.runId, options.env);
+    } catch (error) {
+      cleanup = automaticRecoveryCleanupWarning(error);
+    }
+    // Completion must carry the warning even when optional diagnostic writes fail.
+    // Required boot/outcome persistence above remains outside this advisory boundary.
+    if (cleanup) {
+      updateRun = projectUpdateRunResultSteps(updateRun, [cleanup]);
+    }
   }
   return updateRun;
 }

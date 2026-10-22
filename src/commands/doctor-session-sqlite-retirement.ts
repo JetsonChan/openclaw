@@ -236,6 +236,9 @@ export async function retireOwnedSessionSqliteRecovery(
       item.kind !== "update-capture" &&
       (item.outcome === "candidate" || item.outcome === "verification-required"),
   );
+  const deferOriginalDisposal =
+    params.verifyHistorical === false &&
+    originals.some((item) => item.outcome === "verification-required");
   for (const [index, item] of originals.entries()) {
     params.onProgress?.({
       phase: "verifying",
@@ -244,9 +247,13 @@ export async function retireOwnedSessionSqliteRecovery(
       total: originals.length,
       bytes: item.bytes,
     });
-    if (item.outcome === "verification-required" && params.verifyHistorical === false) {
-      // Deferred verification is retention, not a provisional candidate: keep
-      // its index/transcript dependencies when protection propagates below.
+    if (deferOriginalDisposal) {
+      // Historical indexes can reference originals in other manifests. Without
+      // that verification the dependency graph is incomplete, so defer original
+      // disposal as a group. Captures retain their independent eligibility rules.
+      if (item.outcome === "candidate") {
+        item.reason = "historical-recovery-dependencies-unverified";
+      }
       item.outcome = "protected";
       continue;
     }
