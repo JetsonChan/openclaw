@@ -960,6 +960,9 @@ export const en: TranslationMap & {
     addEntry: "Add Entry",
     key: "Key",
     removeEntry: "Remove entry",
+    renameRejected: "Rename not applied. The original key was kept. {reason}",
+    renameDuplicateKey: "This key is already in use.",
+    renameInvalidKey: "Choose a key that matches this setting's constraints.",
     renameRedactedBlocked:
       "This entry holds a stored secret. Add the new key with its value, then remove this one.",
     schemaUnavailable: "Schema unavailable.",
