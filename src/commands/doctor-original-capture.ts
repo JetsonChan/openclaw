@@ -164,7 +164,13 @@ export async function preserveDoctorOriginalState(params: {
     // repair can retain the newest standalone original only after exact proof.
     const reused = params.fullIntegrityCheck
       ? undefined
-      : await findReusableDoctorCapture({ stateDir, installRoot, env: params.env, assertCurrent });
+      : await findReusableDoctorCapture({
+          stateDir,
+          installRoot,
+          env: params.env,
+          assertCurrent,
+          signal: params.signal,
+        });
     assertCurrent();
     const standaloneRunId = reused ? path.basename(reused.directory) : `doctor-${randomUUID()}`;
     const captured = reused

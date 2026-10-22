@@ -15,6 +15,11 @@ import {
   withArtifactPreservingStateReads,
   withOpenClawStateDatabaseReadSnapshot,
 } from "../state/openclaw-state-db-readonly.js";
+import {
+  getOpenClawDatabaseMaintenanceScope,
+  maintenanceOwnerHasSourceCustody,
+  maintenanceOwnerMayCopySourcesInProcess,
+} from "../state/openclaw-state-maintenance-context.js";
 import { resolveBackupConfigCapture } from "./backup-config-capture.js";
 import { resolvePathViaExistingAncestorSync } from "./boundary-path.js";
 import { sha256Hex } from "./crypto-digest.js";
@@ -28,8 +33,19 @@ import { SQLITE_SIDECAR_SUFFIXES } from "./sqlite-files.js";
 import { resolvePrivateSqliteSnapshotStagingRoot } from "./sqlite-private-directory.js";
 import { resolveSqliteInspectionBudget } from "./sqlite-readonly-worker.js";
 import { createSqliteSnapshotStagingDirectory } from "./sqlite-snapshot-staging.js";
-import { discoverUpdateStateSchemaInspectionInProcess } from "./update-candidate-state.js";
+import {
+  parseUpdateStateInspectionWorker,
+  runUpdateStateInspectionWorker,
+} from "./update-candidate-state.inspection.js";
+import {
+  discoverUpdateStateSchemaInspectionInProcess,
+  UpdateStateSchemaInspectionPlanSchema,
+} from "./update-candidate-state.js";
 import { withStateInspectionCleanup } from "./update-candidate-state.process.js";
+import {
+  readUpdateStateDatabaseSizes,
+  readUpdateStateDatabaseSizesInProcess,
+} from "./update-candidate-state.sizes.js";
 import { withVerifiedUpdateRecoveryBackup } from "./update-recovery-backup-reader.js";
 import type { UpdateRecoveryBaselineRef } from "./update-recovery-baseline-capture.js";
 import { canonicalEntryPath } from "./update-recovery-path.js";
@@ -40,6 +56,7 @@ type ReuseOptions = {
   installRoot: string;
   env: NodeJS.ProcessEnv;
   assertCurrent: () => void;
+  signal?: AbortSignal;
 };
 
 // These are optimization budgets, never capture/update admission limits. An
@@ -54,6 +71,7 @@ export async function findReusableDoctorCapture(
     performance.now() +
     resolveSqliteInspectionBudget("Doctor capture comparison", params.stateDir, 0).timeoutMs;
   const check = () => {
+    params.signal?.throwIfAborted();
     params.assertCurrent();
     if (performance.now() > deadline) {
       throw new Error("Standalone Doctor capture comparison exceeded its reuse budget.");
@@ -132,6 +150,7 @@ export async function findReusableDoctorCapture(
     if (hasCommandProcessCleanupError(error)) {
       throw error;
     }
+    params.signal?.throwIfAborted();
     return undefined;
   }
 }
@@ -204,16 +223,42 @@ async function compareCurrentSources(
   // databases. Reading only yesterday's roots would miss a newly created store.
   const stagingRoot = await createSqliteSnapshotStagingDirectory(
     resolvePrivateSqliteSnapshotStagingRoot(params.env),
+    false,
+    params.signal,
   );
-  const inventory = await withStateInspectionCleanup(stagingRoot, () =>
-    discoverUpdateStateSchemaInspectionInProcess({
+  const inventory = await withStateInspectionCleanup(stagingRoot, async () => {
+    const input = {
       stateDir: params.stateDir,
       config: configuration.snapshot.sourceConfig,
       env: params.env,
       stagingRoot,
       preserveSourceArtifacts: true,
-    }),
-  );
+    };
+    const shared = path.join(params.stateDir, "state", "openclaw.sqlite");
+    const scope = getOpenClawDatabaseMaintenanceScope();
+    // Use the same custody/size policy as fresh capture. A large source copy
+    // must not block Doctor's signal handling while it owns the stopped service.
+    if (maintenanceOwnerMayCopySourcesInProcess(scope, shared)) {
+      return discoverUpdateStateSchemaInspectionInProcess(input);
+    }
+    const worker = {
+      nodeRunner: process.execPath,
+      sourceEnv: params.env,
+      stagingRoot,
+      signal: params.signal,
+    };
+    return parseUpdateStateInspectionWorker(
+      await runUpdateStateInspectionWorker({
+        ...worker,
+        input: { ...input, mode: "discover" },
+        databases: maintenanceOwnerHasSourceCustody(scope, shared)
+          ? await readUpdateStateDatabaseSizesInProcess([shared], params.signal)
+          : await readUpdateStateDatabaseSizes([shared], worker),
+        retryAdvice: false,
+      }),
+      UpdateStateSchemaInspectionPlanSchema,
+    );
+  });
   check();
   const roots = new Set(resources.keys());
   const databasePaths = new Set<string>();

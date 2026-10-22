@@ -8,7 +8,12 @@ import { beginDoctorMaintenance } from "../commands/doctor-maintenance.js";
 import { preserveDoctorOriginalState } from "../commands/doctor-original-capture.js";
 import * as declarations from "../plugins/doctor-contract-registry.js";
 import { getOpenClawDatabaseMaintenanceScope } from "../state/openclaw-state-db-async-lifecycle.js";
+import {
+  closeOpenClawStateDatabaseAsync,
+  openOpenClawStateDatabase,
+} from "../state/openclaw-state-db.js";
 import { findReusableDoctorCapture } from "./doctor-capture-reuse.js";
+import * as discoveryWorker from "./update-candidate-state.inspection.js";
 import { resolveUpdateCaptureRoot } from "./update-capture-paths.js";
 import { resolveManagedUpdateLeaseDatabasePath } from "./update-managed-service-handoff-lease.js";
 
@@ -260,6 +265,71 @@ it("reuses large unchanged originals instead of falling back because of their by
   expect(first).toHaveLength(1);
   expect((await f.capture()).warnings).toEqual([]);
   expect(await f.captures()).toEqual(first);
+});
+
+it("cancels large shared-database reuse discovery and settles its private worker before cleanup", async () => {
+  const f = await fixture();
+  const shared = openOpenClawStateDatabase().path;
+  await closeOpenClawStateDatabaseAsync();
+  {
+    using database = new DatabaseSync(shared);
+    database.exec(
+      "CREATE TABLE doctor_capture_fixture(payload BLOB); INSERT INTO doctor_capture_fixture VALUES(zeroblob(68157440));",
+    );
+  }
+  expect((await f.capture()).warnings).toEqual([]);
+  const originals = await f.captures();
+  const controller = new AbortController();
+  const cancellation = new Error("cancel large shared-state comparison");
+  const runWorker = discoveryWorker.runUpdateStateInspectionWorker;
+  let staging: string | undefined;
+  let observedProgress = false;
+  // Observe the real child's progress and cancel its actual owner; do not
+  // replace discovery, its result, capture, or process settlement.
+  vi.spyOn(discoveryWorker, "runUpdateStateInspectionWorker").mockImplementation((params) =>
+    runWorker({
+      ...params,
+      onProgress: (progress) => {
+        params.onProgress?.(progress);
+        if (params.input.mode === "discover" && progress.path === shared) {
+          staging = params.stagingRoot;
+          observedProgress = true;
+          controller.abort(cancellation);
+        }
+      },
+    }),
+  );
+  await expect(
+    beginDoctorMaintenance({
+      options: { repair: true, nonInteractive: true },
+      root: f.root,
+      runtime: { log() {}, error() {}, exit() {} },
+      beforeStateMutation: async ({ env }) => {
+        await findReusableDoctorCapture({
+          stateDir: f.stateDir,
+          installRoot: f.root,
+          env,
+          signal: controller.signal,
+          assertCurrent: getOpenClawDatabaseMaintenanceScope()!.assertAdmission,
+        });
+      },
+    }).then(async (maintenance) => {
+      // A regression that bypasses the worker must still release its real owner
+      // before the expected-cancellation assertion fails.
+      await maintenance?.release();
+      return maintenance;
+    }),
+  ).rejects.toThrow(cancellation.message);
+  expect(observedProgress).toBe(true);
+  expect(staging).toBeDefined();
+  expect(await fs.stat(staging!).catch(() => undefined)).toBeUndefined();
+  expect(await f.captures()).toEqual(originals);
+  using source = new DatabaseSync(shared, { readOnly: true });
+  expect(
+    source.prepare("SELECT length(payload) AS size FROM doctor_capture_fixture").get(),
+  ).toEqual({
+    size: 68157440,
+  });
 });
 
 it("treats the verification entry bound as a cache miss and still creates a fresh baseline", async () => {
