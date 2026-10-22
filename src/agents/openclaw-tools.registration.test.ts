@@ -220,6 +220,26 @@ describe("openclaw-tools progress_card gating", () => {
     },
   );
 
+  it.each(["ops", "research"])(
+    "uses the admitted %s owner for secrets opt-in in a global session",
+    (agentId) => {
+      const names = createFastToolNames({
+        runSessionKey: "global",
+        requesterAgentIdOverride: agentId,
+        config: {
+          agents: {
+            ownership: "explicit",
+            entries: {
+              ops: {},
+              research: { tools: { alsoAllow: ["secrets"] } },
+            },
+          },
+        },
+      });
+      expect(names.includes("secrets")).toBe(agentId === "research");
+    },
+  );
+
   it("keeps human-question tools on permitted primary sessions", async () => {
     for (const toolName of ["ask_user", "secrets"] as const) {
       const includeTool = (agentSessionKey?: string) =>

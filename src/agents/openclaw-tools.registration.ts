@@ -128,6 +128,7 @@ export function shouldIncludeProgressCardToolForOpenClawTools(
 }
 
 type PrimarySessionToolRegistrationParams = {
+  agentId?: string;
   questionInputMode?: ReturnType<typeof resolveConversationQuestionInputMode>;
   config?: OpenClawConfig;
   agentSessionKey?: string;
@@ -156,6 +157,7 @@ export function shouldIncludePrimarySessionToolForOpenClawTools(
   return (
     isPrimaryBootstrapRun(sessionKey) &&
     isToolAllowedByPolicyName(toolName, { deny }) &&
-    (toolName !== "secrets" || isSecretsToolAllowed({ config: params.config, sessionKey }))
+    (toolName !== "secrets" ||
+      isSecretsToolAllowed({ config: params.config, sessionKey, agentId: params.agentId }))
   );
 }

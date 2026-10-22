@@ -420,8 +420,8 @@ export function resolveEffectiveToolPolicy(params: {
     markFrozenClawToolAllowPolicy(agentPolicy);
   }
 
-  // Protected credential requests are deliberate opt-in, not a consequence of
-  // a broad profile/group/wildcard. Reuse the active alsoAllow inheritance.
+  // Keep credential opt-in separate from native-runtime restrictions and additive
+  // grant provenance. Broad profiles/groups/wildcards do not opt in.
   const secretsOptIn = [
     ...(globalTools?.allow ?? []),
     ...(agentTools?.allow ?? []),
@@ -432,9 +432,8 @@ export function resolveEffectiveToolPolicy(params: {
     agentId,
     sources,
     profiles,
-    globalPolicy: secretsOptIn
-      ? globalPolicy
-      : { ...globalPolicy, deny: [...(globalPolicy?.deny ?? []), "secrets"] },
+    globalPolicy,
+    secretsOptIn,
     globalProviderPolicy: pickSandboxToolPolicy(providerPolicy),
     agentPolicy,
     agentProviderPolicy: pickSandboxToolPolicy(agentProviderPolicy),
@@ -508,17 +507,20 @@ export function isSecretsToolAllowed(
   params: Parameters<typeof resolveEffectiveToolPolicy>[0],
 ): boolean {
   const effective = resolveEffectiveToolPolicy(params);
-  return isToolAllowedByPolicies("secrets", [
-    mergeAlsoAllowPolicy(resolveToolProfilePolicy(effective.profile), effective.profileAlsoAllow),
-    mergeAlsoAllowPolicy(
-      resolveToolProfilePolicy(effective.providerProfile),
-      effective.providerProfileAlsoAllow,
-    ),
-    effective.globalPolicy,
-    effective.globalProviderPolicy,
-    effective.agentPolicy,
-    effective.agentProviderPolicy,
-  ]);
+  return (
+    effective.secretsOptIn &&
+    isToolAllowedByPolicies("secrets", [
+      mergeAlsoAllowPolicy(resolveToolProfilePolicy(effective.profile), effective.profileAlsoAllow),
+      mergeAlsoAllowPolicy(
+        resolveToolProfilePolicy(effective.providerProfile),
+        effective.providerProfileAlsoAllow,
+      ),
+      effective.globalPolicy,
+      effective.globalProviderPolicy,
+      effective.agentPolicy,
+      effective.agentProviderPolicy,
+    ])
+  );
 }
 
 function throwUnavailableScheduledAccount(accountId: string): never {

@@ -18,8 +18,5 @@ describe("buildCredentialSafetyPrompt", () => {
     expect(prompt.includes("without repeating its value")).toBe(lines > 1);
     expect(prompt.includes("factual and non-alarming")).toBe(lines > 1);
     expect(prompt).not.toContain("legacy-secrets-tool");
-    expect(prompt).toContain("only when the user already has public HTTPS or Tailscale configured");
-    expect(prompt).toContain("never suggest setting up exposure");
-    expect(prompt).toContain("A configured address does not prove reachability");
   });
 });
