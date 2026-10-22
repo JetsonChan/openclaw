@@ -159,17 +159,26 @@ export async function preserveDoctorOriginalState(params: {
       throw new Error("The Doctor process could not be identified for the pre-repair capture.");
     }
     assertCurrent();
-    const standaloneRunId = `doctor-${randomUUID()}`;
-    const captured = await captureUpdateRecoveryBaseline({
-      runId: standaloneRunId,
-      installRoot,
-      env: params.env,
-      drivers: [driver],
-      assertCurrent,
-      signal: params.signal,
-      acquisition: { mode: "maintenance-owner" },
-      fullIntegrityCheck: params.fullIntegrityCheck,
-    });
+    const { findReusableDoctorCapture } = await import("../infra/doctor-capture-reuse.js");
+    // Explicit full verification keeps its database-integrity work. Ordinary
+    // repair can retain the newest standalone original only after exact proof.
+    const reused = params.fullIntegrityCheck
+      ? undefined
+      : await findReusableDoctorCapture({ stateDir, installRoot, env: params.env, assertCurrent });
+    assertCurrent();
+    const standaloneRunId = reused ? path.basename(reused.directory) : `doctor-${randomUUID()}`;
+    const captured = reused
+      ? { ref: reused, warnings: [], diagnostics: { databaseWarnings: [] } }
+      : await captureUpdateRecoveryBaseline({
+          runId: standaloneRunId,
+          installRoot,
+          env: params.env,
+          drivers: [driver],
+          assertCurrent,
+          signal: params.signal,
+          acquisition: { mode: "maintenance-owner" },
+          fullIntegrityCheck: params.fullIntegrityCheck,
+        });
     assertCurrent();
     warnings.push(...captured.warnings.map((warning) => warning.message));
     findings.push(
@@ -189,7 +198,9 @@ export async function preserveDoctorOriginalState(params: {
       })),
     );
     log.debug(
-      `Recovery copy saved before repair. No action needed. For manual recovery: ${captured.ref.manifestPath}.`,
+      reused
+        ? `Unchanged original recovery copy verified and retained before repair. For manual recovery: ${captured.ref.manifestPath}.`
+        : `Recovery copy saved before repair. No action needed. For manual recovery: ${captured.ref.manifestPath}.`,
     );
     if (activationMarker) {
       try {
