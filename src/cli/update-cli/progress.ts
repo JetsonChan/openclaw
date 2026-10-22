@@ -19,7 +19,7 @@ import {
   renderUpdateRunReport,
   updateRunReportInputFromResult,
 } from "../../infra/update-run-report.js";
-import { isFailedUpdateStep } from "../../infra/update-run-step.js";
+import { isFailedUpdateStep, updateRunStepsFromResultStep } from "../../infra/update-run-step.js";
 import type { UpdateRunResult, UpdateStepProgress } from "../../infra/update-runner-types.js";
 import type { UpdateStepResult } from "../../infra/update-step-result.js";
 import { defaultRuntime } from "../../runtime.js";
@@ -329,18 +329,31 @@ export async function prepareResult(
     const reportedResult = additionalSteps.length
       ? { ...result, steps: [...result.steps, ...additionalSteps] }
       : result;
+    const reportedRun =
+      run && additionalSteps.length
+        ? {
+            ...run,
+            steps: [
+              ...new Map(
+                [...run.steps, ...additionalSteps.flatMap(updateRunStepsFromResultStep)].map(
+                  (step) => [step.step, step],
+                ),
+              ).values(),
+            ],
+          }
+        : run;
     const outputReport = additionalSteps.length
-      ? renderUpdateRunReport(updateRunReportInputFromResult(reportedResult, run), {
+      ? renderUpdateRunReport(updateRunReportInputFromResult(reportedResult, reportedRun), {
           ...reportHints,
           mode: result.mode === "unknown" ? run?.target.kind : result.mode,
           markdownLimit: Infinity,
         })
       : preparedReport;
-    finalizeProgress?.finish(run);
+    finalizeProgress?.finish(reportedRun);
     if (opts.json) {
       defaultRuntime.writeJson({
         ...reportedResult,
-        ...(run ? { run: toPublicUpdateRun(run) } : {}),
+        ...(reportedRun ? { run: toPublicUpdateRun(reportedRun) } : {}),
         reportPath,
       });
       return;

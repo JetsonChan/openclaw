@@ -245,6 +245,9 @@ export async function retireOwnedSessionSqliteRecovery(
       bytes: item.bytes,
     });
     if (item.outcome === "verification-required" && params.verifyHistorical === false) {
+      // Deferred verification is retention, not a provisional candidate: keep
+      // its index/transcript dependencies when protection propagates below.
+      item.outcome = "protected";
       continue;
     }
     if (item.outcome === "verification-required") {

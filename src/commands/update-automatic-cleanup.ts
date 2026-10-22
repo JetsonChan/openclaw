@@ -52,7 +52,22 @@ export async function cleanupCompletedUpdateRecovery(
         env,
         preview,
         readConfig,
-        confirm: async () => true,
+        confirm: async (verified) => {
+          // Backward clock adjustments must not make this run its own successor.
+          if (
+            verified.artifacts.some(
+              (item) =>
+                item.kind === "update-capture" &&
+                item.outcome === "candidate" &&
+                item.runs.includes(runId),
+            )
+          ) {
+            throw new Error(
+              "The triggering update's own capture must be retained; cleanup deferred",
+            );
+          }
+          return true;
+        },
         verifyHistorical: false,
       },
       { assertCurrent },
@@ -60,7 +75,8 @@ export async function cleanupCompletedUpdateRecovery(
     const retained = report.artifacts.filter(
       (item) =>
         ["blocked", "failed", "candidate", "verification-required"].includes(item.outcome) ||
-        item.reason === "unreadable-update-history",
+        item.reason === "unreadable-update-history" ||
+        item.reason === "historical-manifest-without-import-proof",
     );
     const summary = `Recovery cleanup removed ${report.totals.removedFiles} files (${report.totals.removedBytes} logical bytes); protected recovery artifacts were retained.`;
     return {
@@ -74,7 +90,7 @@ export async function cleanupCompletedUpdateRecovery(
         ? {
             advisory: {
               kind: "recoverable-maintenance" as const,
-              message: `${summary} Not retired: ${retained.map((item) => `${item.path} (${item.reason}${item.detail ? `: ${item.detail}` : ""})`).join("; ")}. Inspect with openclaw update cleanup --dry-run.`,
+              message: `${summary} Not fully retired: ${retained.map((item) => `${item.path} (${item.reason}${item.detail ? `: ${item.detail}` : ""})`).join("; ")}. Inspect with openclaw update cleanup --dry-run.`,
             },
           }
         : {}),

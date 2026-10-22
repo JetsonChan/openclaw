@@ -11,6 +11,7 @@ import { cleanupGatewayUpdateRecovery } from "../gateway/update-automatic-cleanu
 import { readGatewayLockProcessNamespace } from "../infra/gateway-lock-payload.js";
 import { acquireGatewayLock } from "../infra/gateway-lock.js";
 import { acquireGatewayStateOwner } from "../infra/gateway-state-owner.js";
+import { writeSessionSqliteMigrationManifest } from "../infra/session-sqlite-migration-manifest.js";
 import { resolveUpdateCaptureRoot } from "../infra/update-capture-paths.js";
 import {
   UPDATE_CAPTURE_PRIVACY_MARKER,
@@ -18,6 +19,7 @@ import {
 } from "../infra/update-capture-privacy-marker.js";
 import { createRetainedUpdateRecovery } from "../infra/update-retained-recovery.test-support.js";
 import { createUpdateRun, finishUpdateRun, getUpdateRun } from "../infra/update-run-ledger.js";
+import type { UpdateRunRecord } from "../infra/update-run-record.js";
 import type { UpdateRunResult } from "../infra/update-runner-types.js";
 import { defaultRuntime } from "../runtime.js";
 import { closeOpenClawStateDatabaseAsync } from "../state/openclaw-state-db.js";
@@ -29,9 +31,11 @@ import {
 } from "./doctor-migration-backup-artifacts.js";
 import { inspectSessionSqliteRecovery } from "./doctor-session-sqlite-recovery-inventory.js";
 import { retireSessionSqliteRecovery } from "./doctor-session-sqlite-retirement.js";
+import { useDoctorSessionSqliteTestFixture } from "./doctor-session-sqlite.test-support.js";
 import { withDoctorSqliteMaintenanceLock } from "./doctor-sqlite-maintenance-lock.js";
 
 const dirs = useAutoCleanupTempDirTracker(afterEach);
+const { createVerifiedRecoveryStore } = useDoctorSessionSqliteTestFixture();
 let env: NodeJS.ProcessEnv;
 let stateDir: string;
 let now: number;
@@ -52,6 +56,7 @@ beforeEach(() => {
   env = { ...process.env };
   now = Date.now();
   vi.spyOn(defaultRuntime, "writeJson").mockImplementation(() => {});
+  vi.spyOn(defaultRuntime, "log").mockImplementation(() => {});
   vi.spyOn(defaultRuntime, "error").mockImplementation(() => {});
 });
 afterEach(async () => {
@@ -104,13 +109,15 @@ function capture(runId: string, doctor = false, age = 0) {
   return directory;
 }
 function start(at: number) {
-  using _clock = vi.spyOn(Date, "now").mockReturnValue(at);
+  using clock = vi.spyOn(Date, "now");
+  clock.mockReturnValue(at);
   return createUpdateRun({ trigger: "cli" }, { env }).runId;
 }
-async function complete(runId: string, at: number) {
-  using _clock = vi.spyOn(Date, "now").mockReturnValue(at);
+async function complete(runId: string, at: number, json = true) {
+  using clock = vi.spyOn(Date, "now");
+  clock.mockReturnValue(at);
   const emit = await prepareUpdateCommandTerminalResult(
-    { opts: { json: true, run: { runId, env } } },
+    { opts: { json, run: { runId, env } } },
     { status: "ok", mode: "git", steps: [], durationMs: 1 },
     { rolledBack: false },
   );
@@ -159,31 +166,50 @@ it("retires the previous successful generation and migration originals, but reta
   ).toBeUndefined();
 });
 
-it("keeps durable success and reports an actual retirement failure in JSON and update status", async () => {
-  const first = start(now - 120_000);
-  const original = capture(first);
-  await complete(first, now - 60_000);
-  const second = start(now);
-  const rm = fs.promises.rm;
-  using _failure = vi.spyOn(fs.promises, "rm").mockImplementation(async (target, options) => {
-    if (String(target).startsWith(original + path.sep)) {
-      throw new Error("injected retirement failure");
+it.each([true, false])(
+  "keeps success and reports an actual retirement failure consistently (JSON: %s)",
+  async (json) => {
+    const first = start(now - 120_000);
+    const original = capture(first);
+    await complete(first, now - 60_000);
+    const second = start(now);
+    const rm = fs.promises.rm;
+    using failure = vi.spyOn(fs.promises, "rm");
+    failure.mockImplementation(async (target, options) => {
+      if (String(target).startsWith(original + path.sep)) {
+        throw new Error("injected retirement failure");
+      }
+      return rm(target, options);
+    });
+    vi.mocked(defaultRuntime.log).mockClear();
+    const result = await complete(second, now + 1_000, json);
+    expect(fs.existsSync(original)).toBe(true);
+    expect(result.steps.at(-1)?.advisory?.message).toContain("injected retirement failure");
+    if (json) {
+      const output = vi
+        .mocked(defaultRuntime.writeJson)
+        .mock.calls.at(-1)?.[0] as UpdateRunResult & { run: UpdateRunRecord };
+      expect(output.status).toBe("ok");
+      expect(output.steps.at(-1)?.advisory?.message).toContain("injected retirement failure");
+      expect(output.run.steps).toContainEqual(
+        expect.objectContaining({
+          step: "warning:recovery-artifact-cleanup",
+          detail: expect.stringContaining("injected retirement failure"),
+        }),
+      );
+    } else {
+      const printed = vi.mocked(defaultRuntime.log).mock.calls.flat().join("\n");
+      expect(printed).toContain("OpenClaw updated; 1 warning needs attention");
+      expect(printed).toContain("injected retirement failure");
     }
-    return rm(target, options);
-  });
-  const result = await complete(second, now + 1_000);
-  expect(fs.existsSync(original)).toBe(true);
-  expect(result.steps.at(-1)?.advisory?.message).toContain("injected retirement failure");
-  const output = vi.mocked(defaultRuntime.writeJson).mock.calls.at(-1)?.[0] as UpdateRunResult;
-  expect(output.status).toBe("ok");
-  expect(output.steps.at(-1)?.advisory?.message).toContain("injected retirement failure");
-  expect(getUpdateRun(second, { env })?.steps).toContainEqual(
-    expect.objectContaining({
-      step: "warning:recovery-artifact-cleanup",
-      detail: expect.stringContaining("injected retirement failure"),
-    }),
-  );
-});
+    expect(getUpdateRun(second, { env })?.steps).toContainEqual(
+      expect.objectContaining({
+        step: "warning:recovery-artifact-cleanup",
+        detail: expect.stringContaining("injected retirement failure"),
+      }),
+    );
+  },
+);
 
 it("runs retirement in the owning Gateway worker while manual cleanup still refuses its live lock", async () => {
   const pending = start(now - 240_000);
@@ -195,7 +221,8 @@ it("runs retirement in the owning Gateway worker while manual cleanup still refu
   const second = start(now + 60_000);
   const current = capture(second);
   {
-    using _clock = vi.spyOn(Date, "now").mockReturnValue(now + 61_000);
+    using clock = vi.spyOn(Date, "now");
+    clock.mockReturnValue(now + 61_000);
     finishUpdateRun(second, { status: "succeeded" }, { env });
   }
   // Persist an actual pending recovery record after terminal history, as on
@@ -273,4 +300,44 @@ it("does not retire artifacts when another process owns live state", async () =>
     }
     await closed;
   }
+});
+
+it.each(["legacy-store", "transcript"] as const)(
+  "keeps the entire mixed-proof recovery set when its %s needs historical verification",
+  async (unverifiedKind) => {
+    const fixture = await createVerifiedRecoveryStore();
+    env = fixture.store.env;
+    stateDir = fixture.store.stateDir;
+    const originals = new Map(
+      fixture.target.completedMoves.map((move) => [
+        move.archivePath,
+        fs.readFileSync(move.archivePath),
+      ]),
+    );
+    // A supported historical receipt can lack proof for only part of a connected
+    // recovery set. Deferring that verification must also retain its dependencies.
+    for (const move of [...fixture.target.plannedMoves, ...fixture.target.completedMoves]) {
+      if (move.kind === unverifiedKind) {
+        delete move.artifact;
+      }
+    }
+    writeSessionSqliteMigrationManifest({
+      manifestPath: fixture.manifestPath,
+      manifest: fixture.manifest,
+    });
+    const runId = start(now + 60_000);
+    await complete(runId, now + 61_000);
+    for (const [file, contents] of originals) {
+      expect(fs.existsSync(file), file).toBe(true);
+      expect(fs.readFileSync(file)).toEqual(contents);
+    }
+  },
+);
+
+it("keeps the triggering update's capture when the wall clock moves backward", async () => {
+  const runId = start(now + 60_000);
+  const current = capture(runId);
+  const result = await complete(runId, now);
+  expect(fs.existsSync(current)).toBe(true);
+  expect(result.steps.at(-1)?.advisory?.message).toContain("triggering update");
 });
