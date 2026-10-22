@@ -81,6 +81,8 @@ function ChatAudioPlayerContent(
   const sourceState = projectOwner(sourceController, (owner) => owner);
   const cancelPendingResume = () => sourceController.cancelPendingResume();
   let mediaElement: HTMLAudioElement | null = null;
+  let fallbackDownload: HTMLAnchorElement | undefined;
+  const setFallbackDownload = (element: HTMLAnchorElement) => (fallbackDownload = element);
   let releaseWaveformBlob: (() => void) | undefined;
   let waveformController: AbortController | null = null;
   let waveformAttempted = false;
@@ -589,7 +591,23 @@ function ChatAudioPlayerContent(
             setState((draft) => Object.assign(draft, { playing: false }));
           }}
           onError={(event) => {
+            const document = host.ownerDocument;
+            const focused = document.activeElement;
+            const ownedFocus = host.contains(focused);
             if (!sourceController.handleError(event.currentTarget)) {
+              if (ownedFocus) {
+                // The failed player is replaced; wait for its useful fallback action to mount.
+                onSettled(() => {
+                  if (
+                    host.isConnected &&
+                    fallbackDownload?.isConnected &&
+                    sourceController.readiness === "unavailable" &&
+                    (document.activeElement === focused || document.activeElement === document.body)
+                  ) {
+                    fallbackDownload.focus({ preventScroll: true });
+                  }
+                });
+              }
               releaseChatAudioPlayback(event.currentTarget);
               setState((draft) => Object.assign(draft, { playing: false }));
             }
@@ -610,7 +628,10 @@ function ChatAudioPlayerContent(
       <Show
         when={sourceState.read().readiness !== "unavailable"}
         fallback={
-          <Show when={props.voiceNote} fallback={<CompactAttachmentCard {...card()} />}>
+          <Show
+            when={props.voiceNote}
+            fallback={<CompactAttachmentCard {...card()} downloadRef={setFallbackDownload} />}
+          >
             <div class="chat-assistant-attachment-card chat-assistant-attachment-card--voice-note">
               <div class="chat-audio-player" role="group" aria-label={t("chat.messages.voiceNote")}>
                 <span class="chat-assistant-attachment-card__reason" role="status">
@@ -619,6 +640,7 @@ function ChatAudioPlayerContent(
                 <Show when={downloadHref()}>
                   <a
                     class="chat-assistant-attachment-card__action"
+                    ref={setFallbackDownload}
                     href={downloadHref()}
                     download={props.label}
                     target="_blank"

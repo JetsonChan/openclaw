@@ -311,6 +311,36 @@ describe("ChatAudioPlayer", () => {
     expect(status?.textContent).toBe("replacement.mp3: Preview unavailable");
   });
 
+  it.each([false, true])(
+    "hands departing player focus to Download without taking outside focus (voice note: %s)",
+    async (voiceNote) => {
+      const outside = document.createElement("button");
+      outside.textContent = "Outside player";
+      document.body.append(outside);
+      for (const target of ["toggle", "volume", "seek", "group", "outside", "moved"]) {
+        const player = await createPlayer("focus-" + target, { voiceNote });
+        const focused =
+          target === "outside"
+            ? outside
+            : target === "group"
+              ? player.querySelector<HTMLElement>(".chat-audio-player")!
+              : control(player, target === "moved" ? "toggle" : target);
+        focused.focus();
+        expect(document.activeElement).toBe(focused);
+        audio(player).dispatchEvent(new Event("error"));
+        if (target === "moved") {
+          outside.focus();
+        }
+        await player.updateComplete;
+        const download = player.querySelector<HTMLAnchorElement>("a[download]")!;
+        expect(download.getAttribute("download")).toBe("focus-" + target + ".mp3");
+        expect(document.activeElement).toBe(
+          target === "outside" || target === "moved" ? outside : download,
+        );
+      }
+    },
+  );
+
   it("shows preparing, retries a 202 rendition, and then plays", async () => {
     vi.useFakeTimers();
     const fetchMock = vi
