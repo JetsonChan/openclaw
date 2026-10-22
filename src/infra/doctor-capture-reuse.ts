@@ -46,6 +46,7 @@ import {
   readUpdateStateDatabaseSizes,
   readUpdateStateDatabaseSizesInProcess,
 } from "./update-candidate-state.sizes.js";
+import { resolveUpdateCaptureRoot } from "./update-capture-paths.js";
 import { withVerifiedUpdateRecoveryBackup } from "./update-recovery-backup-reader.js";
 import type { UpdateRecoveryBaselineRef } from "./update-recovery-baseline-capture.js";
 import { canonicalEntryPath } from "./update-recovery-path.js";
@@ -80,7 +81,19 @@ export async function findReusableDoctorCapture(
   try {
     return await withArtifactPreservingStateReads(async () => {
       check();
-      const { captures, warnings } = collectStandaloneDoctorCaptures(params);
+      // Do not prepare shared-state bytes when there is no retained capture to compare.
+      const root = await fs
+        .lstat(resolveUpdateCaptureRoot(params.stateDir))
+        .catch(ignoreMissingPath);
+      if (!root?.isDirectory()) {
+        return undefined;
+      }
+      // The collector reads recovery/update ledgers synchronously. Prepare its
+      // private view asynchronously so large sources remain cancellable here too.
+      const { captures, warnings } = await withOpenClawStateDatabaseReadSnapshot(
+        async () => collectStandaloneDoctorCaptures(params),
+        { env: params.env, signal: params.signal },
+      );
       if (warnings.length) {
         return undefined;
       }
@@ -205,7 +218,7 @@ async function compareCurrentSources(
         warnings,
         requireLocalResources: true,
       }),
-    { env: params.env },
+    { env: params.env, signal: params.signal },
   );
   plugins.assertCurrent();
   check();
