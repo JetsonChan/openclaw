@@ -104,11 +104,11 @@ function capture(runId: string, doctor = false, age = 0) {
   return directory;
 }
 function start(at: number) {
-  using clock = vi.spyOn(Date, "now").mockReturnValue(at);
+  using _clock = vi.spyOn(Date, "now").mockReturnValue(at);
   return createUpdateRun({ trigger: "cli" }, { env }).runId;
 }
 async function complete(runId: string, at: number) {
-  using clock = vi.spyOn(Date, "now").mockReturnValue(at);
+  using _clock = vi.spyOn(Date, "now").mockReturnValue(at);
   const emit = await prepareUpdateCommandTerminalResult(
     { opts: { json: true, run: { runId, env } } },
     { status: "ok", mode: "git", steps: [], durationMs: 1 },
@@ -165,7 +165,7 @@ it("keeps durable success and reports an actual retirement failure in JSON and u
   await complete(first, now - 60_000);
   const second = start(now);
   const rm = fs.promises.rm;
-  using failure = vi.spyOn(fs.promises, "rm").mockImplementation(async (target, options) => {
+  using _failure = vi.spyOn(fs.promises, "rm").mockImplementation(async (target, options) => {
     if (String(target).startsWith(original + path.sep)) {
       throw new Error("injected retirement failure");
     }
@@ -195,7 +195,7 @@ it("runs retirement in the owning Gateway worker while manual cleanup still refu
   const second = start(now + 60_000);
   const current = capture(second);
   {
-    using clock = vi.spyOn(Date, "now").mockReturnValue(now + 61_000);
+    using _clock = vi.spyOn(Date, "now").mockReturnValue(now + 61_000);
     finishUpdateRun(second, { status: "succeeded" }, { env });
   }
   // Persist an actual pending recovery record after terminal history, as on
