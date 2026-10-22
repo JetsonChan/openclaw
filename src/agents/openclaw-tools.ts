@@ -584,6 +584,7 @@ function* createOpenClawToolsSteps(
     ).map(([name, createTool]) =>
       shouldIncludePrimarySessionToolForOpenClawTools(name, {
         ...options,
+        config: resolvedConfig,
         agentSessionKey: options?.runSessionKey ?? options?.agentSessionKey,
       })
         ? createTool({

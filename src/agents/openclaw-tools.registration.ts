@@ -5,7 +5,7 @@
  */
 import { uniqueStrings } from "@openclaw/normalization-core/string-normalization";
 import type { OpenClawConfig } from "../config/types.openclaw.js";
-import { resolveEffectiveToolPolicy } from "./agent-tools.policy.js";
+import { isSecretsToolAllowed, resolveEffectiveToolPolicy } from "./agent-tools.policy.js";
 import { wrapToolWorkspaceRootGuardWithOptions } from "./agent-tools.read.js";
 import { isPrimaryBootstrapRun } from "./bootstrap-routing.js";
 import type { resolveConversationQuestionInputMode } from "./conversation-capability-profile.js";
@@ -154,5 +154,9 @@ export function shouldIncludePrimarySessionToolForOpenClawTools(
     ...(params.config?.tools?.deny ?? []),
     ...(params.pluginToolDenylist ?? []),
   ]);
-  return isPrimaryBootstrapRun(sessionKey) && isToolAllowedByPolicyName(toolName, { deny });
+  return (
+    isPrimaryBootstrapRun(sessionKey) &&
+    isToolAllowedByPolicyName(toolName, { deny }) &&
+    (toolName !== "secrets" || isSecretsToolAllowed({ config: params.config, sessionKey }))
+  );
 }

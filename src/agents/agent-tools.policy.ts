@@ -48,7 +48,7 @@ import {
   type SessionCapabilityStore,
   type SubagentSessionRole,
 } from "./subagents/spawn/subagent-capabilities.js";
-import { createToolPolicyMatcher } from "./tool-policy-match.js";
+import { createToolPolicyMatcher, isToolAllowedByPolicies } from "./tool-policy-match.js";
 import type { ConfiguredToolPolicySources } from "./tool-policy-pipeline.js";
 import { mergeAlsoAllowPolicy, resolveToolProfilePolicy } from "./tool-policy.js";
 import { AUTOMATIONS_TOOL_NAME } from "./tools/automations-tool-name.js";
@@ -439,11 +439,21 @@ export function resolveEffectiveToolPolicy(params: {
     markFrozenClawToolAllowPolicy(agentPolicy);
   }
 
+  // Protected credential requests are deliberate opt-in, not a consequence of
+  // a broad profile/group/wildcard. Reuse the active alsoAllow inheritance.
+  const secretsOptIn = [
+    ...(globalTools?.allow ?? []),
+    ...(agentTools?.allow ?? []),
+    ...(explicitProfileAlsoAllow ?? []),
+  ].some((name) => normalizeLowercaseStringOrEmpty(name) === "secrets");
+  const globalPolicy = pickSandboxToolPolicy(globalTools);
   const effectivePolicy = {
     agentId,
     sources,
     profiles,
-    globalPolicy: pickSandboxToolPolicy(globalTools),
+    globalPolicy: secretsOptIn
+      ? globalPolicy
+      : { ...globalPolicy, deny: [...(globalPolicy?.deny ?? []), "secrets"] },
     globalProviderPolicy: pickSandboxToolPolicy(providerPolicy),
     agentPolicy,
     agentProviderPolicy: pickSandboxToolPolicy(agentProviderPolicy),
@@ -512,6 +522,24 @@ export function resolveEffectiveToolPolicy(params: {
   }
 
   return { ...effectivePolicy, gatewayConfigReadAllowed };
+}
+
+/** Shared admission check for protected questions outside tool construction. */
+export function isSecretsToolAllowed(
+  params: Parameters<typeof resolveEffectiveToolPolicy>[0],
+): boolean {
+  const effective = resolveEffectiveToolPolicy(params);
+  return isToolAllowedByPolicies("secrets", [
+    mergeAlsoAllowPolicy(resolveToolProfilePolicy(effective.profile), effective.profileAlsoAllow),
+    mergeAlsoAllowPolicy(
+      resolveToolProfilePolicy(effective.providerProfile),
+      effective.providerProfileAlsoAllow,
+    ),
+    effective.globalPolicy,
+    effective.globalProviderPolicy,
+    effective.agentPolicy,
+    effective.agentProviderPolicy,
+  ]);
 }
 
 type GroupToolPolicyOutcome =

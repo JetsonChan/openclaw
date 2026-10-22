@@ -11,12 +11,15 @@ describe("buildCredentialSafetyPrompt", () => {
   ])("scopes guidance to known availability for $name", ({ input, lines }) => {
     const prompt = buildCredentialSafetyPrompt(input);
 
-    // Legacy and unknown callers keep the documented handoff-only result.
-    expect(prompt.split("\n")).toHaveLength(lines);
+    // Legacy and unknown callers still omit unavailable host-specific setup hints.
+    expect(prompt.split("\n")).toHaveLength(lines + 1);
     expect(prompt.includes("openclaw channels add <channel>")).toBe(lines === 3);
     expect(prompt.includes("In the final reply, briefly acknowledge")).toBe(lines > 1);
     expect(prompt.includes("without repeating its value")).toBe(lines > 1);
     expect(prompt.includes("factual and non-alarming")).toBe(lines > 1);
     expect(prompt).not.toContain("legacy-secrets-tool");
+    expect(prompt).toContain("only when the user already has public HTTPS or Tailscale configured");
+    expect(prompt).toContain("never suggest setting up exposure");
+    expect(prompt).toContain("A configured address does not prove reachability");
   });
 });
