@@ -63,8 +63,6 @@ export const vitestWorkerDeclarationEntries = {
     "extensions/memory-core/src/memory/manager-search-knn-runtime.test-support.ts",
   "test-support/qa-otel-smoke-entrypoint.test-support":
     "test/e2e/qa-lab/runtime/qa-otel-smoke-entrypoint.test-support.ts",
-  "extensions/matrix/src/matrix/config-update-runtime.test-support":
-    "extensions/matrix/src/matrix/config-update-runtime.test-support.ts",
   "extensions/openai/realtime-audio-worker-entrypoints.test-support":
     "extensions/openai/realtime-audio-worker-entrypoints.test-support.ts",
   "extensions/code-mode-quickjs/src/worker-entrypoint.test-support":
@@ -102,8 +100,6 @@ export const vitestWorkerDeclarationEntries = {
     "packages/ai/src/providers/clean-for-gemini-runtime.test-support.ts",
   "packages/terminal-core/table-runtime.test-support":
     "packages/terminal-core/src/table-runtime.test-support.ts",
-  "extensions/discord/src/voice/audio-worker-entrypoints.test-support":
-    "extensions/discord/src/voice/audio-worker-entrypoints.test-support.ts",
   // Codex is package-owned and excluded from the root runtime bundle.
   "extensions/codex/catalog-page-worker-entrypoint":
     "extensions/codex/catalog-page-worker-entrypoint.ts",
