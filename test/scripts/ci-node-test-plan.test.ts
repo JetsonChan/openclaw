@@ -334,11 +334,54 @@ describe("Control UI release-only inventories", () => {
     );
     // Array equality also catches duplicate ownership between jobs or desktop proof.
     expectSameEntries(files, expectedFiles);
-    // Desktop and serial proof must not acquire a second parallel-fixture phase.
-    expect(shards[1]?.groups[0]?.includePatterns.toSorted()).toEqual(
-      expectedFiles.filter((file) => uiE2ePrebuiltParallelTestFiles.includes(file)).toSorted(),
-    );
+    // Only qualified fixtures may move off the job owning desktop and serial proof.
+    expect(
+      shards[1]?.groups[0]?.includePatterns.every((file) =>
+        uiE2ePrebuiltParallelTestFiles.includes(file),
+      ),
+    ).toBe(true);
   }
+
+  it("balances qualified real-Gateway work around the serial and desktop proof", () => {
+    const desktop = "ui/src/e2e/desktop-resize.real-gateway.e2e.test.ts";
+    const serial = "ui/src/e2e/session-pr-reader-lifetime.real-gateway.e2e.test.ts";
+    const parallel = [
+      "ui/src/e2e/activity-run-inspector.real-gateway.e2e.test.ts",
+      "ui/src/e2e/agent-file-lifecycle.real-gateway.e2e.test.ts",
+      "ui/src/e2e/chat-agent-avatar.real-gateway.e2e.test.ts",
+      "ui/src/e2e/chat-loading-performance.real-gateway.e2e.test.ts",
+    ];
+    const fileSeconds: Record<string, number> = { [desktop]: 20, [serial]: 40 };
+    for (const file of parallel) {
+      fileSeconds[file] = 100;
+    }
+    const timings = vi.spyOn(testTimings, "readUiE2eFileTimings").mockReturnValue({
+      fileSeconds,
+      perFileOverheadSeconds: 0,
+    });
+    onTestFinished(() => timings.mockRestore());
+    const selected = [desktop, serial, ...parallel];
+    const shards = createUiRealGatewayTestShards([
+      { configs: [configPath("ui-e2e")], shard_name: "ui", includePatterns: selected },
+    ]);
+    expectSameEntries(
+      shards.flatMap((shard) => [
+        ...(shard.run_desktop ? [desktop] : []),
+        ...shard.groups.flatMap((group) => group.includePatterns),
+      ]),
+      selected,
+    );
+    const first = shards[0]!;
+    expect(first.run_desktop).toBe(true);
+    expect(first.groups[0]!.includePatterns).toContain(serial);
+    const work = shards.map((shard) => {
+      const files = shard.groups[0]!.includePatterns;
+      // Whole 100s files occupy two workers; an odd final file still costs 100s.
+      const parallelWaves = Math.ceil(files.filter((file) => parallel.includes(file)).length / 2);
+      return (shard.run_desktop ? 20 : 0) + (files.includes(serial) ? 40 : 0) + parallelWaves * 100;
+    });
+    expect(Math.max(...work)).toBeLessThanOrEqual(160);
+  });
 
   it("retains PR-exempt entries while omitting release-only UI matrices", () => {
     const groups = createUiTestShardGroups({ includeReleaseOnlyTests: false });
