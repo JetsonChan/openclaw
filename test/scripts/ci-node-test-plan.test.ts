@@ -144,8 +144,6 @@ function mockProject(
   timings: Readonly<Record<string, number>>,
 ) {
   vi.resetModules();
-  // Synthetic packing fixtures reuse the actual suite inventory instead of rediscovering UI files.
-  mockFixture("ui", () => uiPaths);
   mockPlanShards(() => [fixtureShard(name, [config])]);
   mockTrackedFiles((candidate) => (candidate === root ? files : []));
   mockPlanTimings(() => timings);
@@ -258,6 +256,8 @@ async function withPlanModule<T>(
 }
 
 function mockPlanShards(shards: () => typeof fullSuiteVitestShards) {
+  // Synthetic packing fixtures reuse the actual suite inventory instead of rediscovering UI files.
+  mockFixture("ui", () => uiPaths);
   mockFixture("shards", async (original) => ({
     ...(await original()),
     fullSuiteVitestShards: shards(),
