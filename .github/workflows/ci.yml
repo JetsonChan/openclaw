@@ -40,6 +40,7 @@ jobs:
       - run: pnpm test test/scripts/bundled-plugin-assets.test.ts --maxWorkers=1
       - run: pnpm test:contracts:channels
       - run: pnpm test:contracts:plugins
+      - run: pnpm test:extension imessage
 
   build:
     name: Selected build and package composition
