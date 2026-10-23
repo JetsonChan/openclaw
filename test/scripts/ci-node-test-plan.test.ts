@@ -71,10 +71,7 @@ import { createRuntimeConfigVitestConfig } from "../vitest/vitest.runtime-config
 import { startupCorpusTestFiles } from "../vitest/vitest.startup-corpus-paths.mjs";
 import { fullSuiteVitestShards } from "../vitest/vitest.test-shards.mjs";
 import * as uiPaths from "../vitest/vitest.ui-paths.mjs";
-import {
-  getUnitFastIsolatedTestFiles,
-  getUnitFastTimerTestFiles,
-} from "../vitest/vitest.unit-fast-paths.mjs";
+import * as unitFastPaths from "../vitest/vitest.unit-fast-paths.mjs";
 import {
   createChangedNodeTestShards as changedOwnerTests,
   selectedFiles,
@@ -89,6 +86,7 @@ import {
 
 const tempDirs = useAutoCleanupTempDirTracker(afterEach);
 const { uiE2ePrebuiltParallelTestFiles, uiE2eRealGatewayTestFiles } = uiPaths;
+const { getUnitFastIsolatedTestFiles, getUnitFastTimerTestFiles } = unitFastPaths;
 
 function required<T>(value: T | null | undefined) {
   return expectDefined(value, "required test fixture");
@@ -235,7 +233,7 @@ function mockFixture<K extends FixtureOwner>(
 }
 
 function resetPlanMocks(extraMocks: readonly FixtureOwner[]) {
-  for (const owner of [...extraMocks, "timings", "files", "shards", "ui"] as const) {
+  for (const owner of [...extraMocks, "timings", "files", "shards", "ui", "fast"] as const) {
     vi.doUnmock(fixtureModuleIds[owner]);
   }
   vi.resetModules();
@@ -256,8 +254,9 @@ async function withPlanModule<T>(
 }
 
 function mockPlanShards(shards: () => typeof fullSuiteVitestShards) {
-  // Synthetic packing fixtures reuse the actual suite inventory instead of rediscovering UI files.
+  // Synthetic packing fixtures reuse actual inventories instead of rediscovering unrelated files.
   mockFixture("ui", () => uiPaths);
+  mockFixture("fast", () => unitFastPaths);
   mockFixture("shards", async (original) => ({
     ...(await original()),
     fullSuiteVitestShards: shards(),
@@ -1374,8 +1373,8 @@ describe("scripts/lib/ci-node-test-plan.mts", () => {
       const buildMode = vi.fn<typeof buildPrerequisites.resolveVitestPretestBuildMode>(
         () => undefined,
       );
-      await mockFastPaths([fastModel]);
       mockPlanShards(() => [fixtureShard("agentic", [config], configPath("full-agentic"))]);
+      await mockFastPaths([fastModel]);
       mockTrackedFiles((root: string) => (root === "src/agents" ? files : []));
       mockPlanTimings(() => seconds);
       mockFixture("metadata", () => ({
@@ -3247,8 +3246,8 @@ describe("scripts/lib/ci-node-test-plan.mts", () => {
       compactNodeJobCap?: number;
     };
   }) {
-    await mockFastPaths();
     mockPlanShards(() => params.shards);
+    await mockFastPaths();
     mockFixture("timings", () => ({
       ...testTimings,
       readCompactGroupTimings: () => params.timings,
