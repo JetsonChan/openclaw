@@ -70,7 +70,8 @@ export function observeScrollState(
       stopScroll: listen(element, "scroll", onScroll, { passive: true }),
     };
     observations.set(element, group);
-    const fonts = element.ownerDocument.fonts;
+    // Refs can still belong to the inert template document before adoption.
+    const fonts = document.fonts;
     if (fonts) {
       const currentGroup = group;
       const fontsChanged = () => {
@@ -78,9 +79,9 @@ export function observeScrollState(
           schedule(element);
         }
       };
-      // Font metrics can change the overflow without resizing the viewport.
+      // Unlike fonts.ready callbacks, this subscription releases retired views
+      // even while a font load remains pending.
       group.stopFonts = listen(fonts, "loadingdone", fontsChanged);
-      void fonts.ready.then(fontsChanged);
     }
     if (!resizeObserver && typeof ResizeObserver !== "undefined") {
       resizeObserver = new ResizeObserver((resized) => {

@@ -14,6 +14,7 @@ import {
   acquireBoardProviderForSession,
   boardProviderCacheKey,
   boardProviderForSession,
+  createNullBoardProvider,
   type BoardCommandEvent,
   type BoardProvider,
   type BoardViewCallbacks,
@@ -58,6 +59,7 @@ import {
 
 export abstract class ChatPaneBoard extends ChatPaneHistory {
   private boardView: HTMLElementTagNameMap["openclaw-board-view"] | null = null;
+  private nullBoardProvider: { cacheKey: string; provider: BoardProvider } | undefined;
   readonly dashboardPresentation: { defaultWrite: { owner: string } | undefined } = {
     defaultWrite: undefined,
   };
@@ -285,9 +287,7 @@ export abstract class ChatPaneBoard extends ChatPaneHistory {
           isGatewayMethodAdvertised(gateway, "board.widget.put") === true));
     const client = gateway?.client;
     if (this.boardProviderLifecycleConnected && client && available) {
-      const presentationScope = this.context
-        ? gatewayPresentationScope(this.context.gateway)
-        : undefined;
+      const presentationScope = gatewayPresentationScope(this.context.gateway);
       const key = JSON.stringify([presentationScope?.key, boardProviderCacheKey(session)]);
       if (this.boardProviderLease?.cacheKey !== key) {
         this.releaseBoardProviderLease();
@@ -341,7 +341,16 @@ export abstract class ChatPaneBoard extends ChatPaneHistory {
       return this.boardProviderLease.provider;
     }
     this.releaseBoardProviderLease();
-    return boardProviderForSession(session, available);
+    const cached = boardProviderForSession(session, available);
+    if (cached) {
+      return cached;
+    }
+    const cacheKey = boardProviderCacheKey(session);
+    if (this.nullBoardProvider?.cacheKey !== cacheKey) {
+      const provider = createNullBoardProvider(session.sessionKey);
+      this.nullBoardProvider = { cacheKey, provider };
+    }
+    return this.nullBoardProvider.provider;
   }
 
   protected releaseBoardProviderLease(): void {
@@ -512,18 +521,15 @@ export abstract class ChatPaneBoard extends ChatPaneHistory {
       state.connectionEpoch === sourceEpoch &&
       parentKey === this.resolveChatReadTarget()?.sessionKey &&
       agentId === this.resolveChatReadTarget()?.agentId;
-    const swarmEnabled = isSwarmEnabledInConfig(
+    this.swarm.enabled = isSwarmEnabledInConfig(
       context.runtimeConfig ? currentDisplayConfig(context.runtimeConfig.state) : null,
       agentId,
     );
-    this.swarm.enabled = swarmEnabled;
     // The child roster also owns ordinary subagent waits, launch rows, and
     // attention. Disabling swarm must not hide those recorded outcomes.
     if (!state.connected) {
-      if (this.swarm.hydrator) {
-        this.swarm.hydrator.dispose();
-        this.swarm.hydrator = null;
-      }
+      this.swarm.hydrator?.dispose();
+      this.swarm.hydrator = null;
       return;
     }
     this.swarm.hydrator ??= new SwarmRosterHydrator();

@@ -11,7 +11,7 @@ import { createGatewayStoreTestStore } from "../../app/gateway-store.test-suppor
 import { loadSettings, patchSettings, saveSettings } from "../../app/settings.ts";
 import {
   acquireBoardProviderForSession,
-  boardProviderForSession,
+  createNullBoardProvider,
   type BoardCommandEvent,
   type BoardProvider,
 } from "../../lib/board/provider.ts";
@@ -620,7 +620,7 @@ describe("chat pane board shell", () => {
 
   it("keeps chat-only reset confirmation disabled", async () => {
     const pane = createTestPane();
-    pane.boardProvider = boardProviderForSession({ sessionKey: "agent:main:current" });
+    pane.boardProvider = createNullBoardProvider("agent:main:current");
 
     await expect(pane.confirmConversationReset()).resolves.toBe(true);
   });
@@ -743,6 +743,25 @@ describe("chat pane board shell", () => {
     configureGatewayMainSession(pane, "work", "primary");
 
     expect(pane.resolveBoardProvider().snapshot$.value.sessionKey).toBe("agent:work:primary");
+  });
+
+  it("keeps empty providers stable within their pane and conversation owner", () => {
+    const pane = createTestPane();
+    configureGatewayMainSession(pane, "main", "main");
+    pane.state.sessionKey = "main";
+    const main = pane.resolveBoardProvider();
+    pane.state.sessionKey = "agent:main:main";
+    expect(pane.resolveBoardProvider()).toBe(main);
+    expect(createTestPane(undefined, "agent:main:main").resolveBoardProvider()).not.toBe(main);
+
+    pane.state.agentsList = { defaultId: "main", mainKey: "main", scope: "global", agents: [] };
+    pane.state.sessionKey = "global";
+    pane.state.assistantAgentId = "main";
+    const globalMain = pane.resolveBoardProvider();
+    pane.state.assistantAgentId = "work";
+    const globalWork = pane.resolveBoardProvider();
+    expect(globalWork).not.toBe(globalMain);
+    expect(pane.resolveBoardProvider()).toBe(globalWork);
   });
 
   it("keeps the board and its iframe connected when a retained pane hides and returns", () => {
