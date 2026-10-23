@@ -8,7 +8,6 @@ import {
   latest,
   Loading,
   Show,
-  untrack,
   type Accessor,
 } from "solid-js";
 import {
@@ -330,8 +329,11 @@ function PaletteSearch(props: {
               </div>
               <For each={group()[1]} keyed={(item) => item.id}>
                 {(item) => {
-                  // Search can move a session between groups; both keys own this row.
-                  const initialKey = untrack(() => `${item().category}:${item().id}`);
+                  const optionRef = (key: string) =>
+                    elementRef<HTMLDivElement>((element) => {
+                      props.optionElements.set(key, element);
+                      return () => props.optionElements.delete(key);
+                    });
                   const index = () => results().items.indexOf(item());
                   const active = () => index() === results().activeIndex;
                   const agentId = () =>
@@ -344,11 +346,7 @@ function PaletteSearch(props: {
                       : undefined;
                   return (
                     <div
-                      ref={elementRef((element: HTMLDivElement) => {
-                        const options = props.optionElements;
-                        options.set(initialKey, element);
-                        return () => options.delete(initialKey);
-                      })}
+                      ref={[optionRef(`${item().category}:${item().id}`)]}
                       id={getOptionId(index())}
                       class={[
                         "cmd-palette__item",
