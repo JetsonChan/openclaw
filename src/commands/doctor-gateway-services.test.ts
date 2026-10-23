@@ -183,19 +183,19 @@ describe("maybeRepairGatewayServiceConfig", () => {
     savedEnv.restore();
   });
 
-  it("reports a passing vendor runtime note without rewriting the service", async () => {
+  it("reports a pending runtime pin migration without rewriting the service", async () => {
     const command = createGatewayCommand("/opt/openclaw/dist/index.js");
     mocks.readCommand.mockResolvedValue(command);
     mocks.buildGatewayInstallPlan.mockResolvedValue(command);
     mocks.auditGatewayServiceConfig.mockResolvedValue({
       ok: true,
       issues: [],
-      runtimeNote: "Node 24.15.0: unsupported version, capability check passed.",
+      runtimeNote: "Runtime pin migration pending; run openclaw doctor.",
     });
 
     await runRepair({ gateway: {} });
 
-    expectNoteContaining("unsupported version, capability check passed", "Gateway runtime");
+    expectNoteContaining("Runtime pin migration pending", "Gateway runtime");
     expect(mocks.resolveSystemNodeInfo).not.toHaveBeenCalled();
     expect(mocks.install).not.toHaveBeenCalled();
   });

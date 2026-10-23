@@ -239,8 +239,8 @@ exit 1
       const activeBin = join(root, "active", "bin");
       writeFakeNode(activeBin, "20.20.0");
       writeFakeNode(join(root, "toolcache", "node", "24.13.0", "x64", "bin"), "24.13.0");
-      const cachedBin = join(root, "cached", "node", "v24.19.0-linux-x64", "bin");
-      const cachedNode = writeFakeNode(cachedBin, "24.19.0");
+      const cachedBin = join(root, "cached", "node", "v24.22.1-linux-x64", "bin");
+      const cachedNode = writeFakeNode(cachedBin, "24.22.1");
       const result = runEnsureNode(root, "24.x", {
         PATH: `${activeBin}:${process.env.PATH ?? ""}`,
         RUNNER_TOOL_CACHE: join(root, "toolcache"),
@@ -248,9 +248,9 @@ exit 1
       });
 
       expect(result.status).toBe(0);
-      expect(result.stdout).toContain(`Using Node 24.19.0 from ${cachedNode}`);
+      expect(result.stdout).toContain(`Using Node 24.22.1 from ${cachedNode}`);
       expect(result.stdout).not.toContain("Downloading Node");
-      expect(result.stdout.trim().endsWith("24.19.0")).toBe(true);
+      expect(result.stdout.trim().endsWith("24.22.1")).toBe(true);
     } finally {
       rmSync(root, { recursive: true, force: true });
     }

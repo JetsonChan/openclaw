@@ -178,7 +178,7 @@ describe("install-cli.sh", () => {
       mkdirSync(join(payload, "bin"), { recursive: true });
       writeFileSync(
         join(payload, "bin", "node"),
-        '#!/bin/bash\nif [[ "${1:-}" == "-v" ]]; then printf "v24.19.0\\n"; fi\n',
+        '#!/bin/bash\nif [[ "${1:-}" == "-v" ]]; then printf "v24.22.1\\n"; fi\n',
         { mode: 0o755 },
       );
       writeFileSync(join(payload, "bin", "npm"), "#!/bin/bash\nexit 0\n", { mode: 0o755 });
@@ -218,12 +218,12 @@ fs.writeFileSync(process.env.FIXTURE_OBSERVATION, JSON.stringify({
             if [[ "$FIXTURE_DOWNLOAD_FAILS" == 1 ]]; then return 42; fi
             case "$1" in
               */SHASUMS256.txt)
-                printf '%s  node-v24.19.0-%s-%s.tar.gz\\n' "$FIXTURE_SHA" "$(os_detect)" "$(arch_detect)" > "$2"
+                printf '%s  node-v24.22.1-%s-%s.tar.gz\\n' "$FIXTURE_SHA" "$(os_detect)" "$(arch_detect)" > "$2"
                 ;;
               *) cp "$FIXTURE_ARCHIVE" "$2" ;;
             esac
           }
-          main --json --node-only --git --onboard --node-version 24.19.0 --prefix "$FIXTURE_PREFIX"
+          main --json --node-only --git --onboard --node-version 24.22.1 --prefix "$FIXTURE_PREFIX"
           `,
           {
             HOME: root,
