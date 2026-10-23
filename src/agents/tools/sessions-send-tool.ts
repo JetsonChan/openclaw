@@ -501,6 +501,7 @@ export function createSessionsSendTool(opts?: SessionsSendToolOptions): AnyAgent
                 watch: params.watch === true,
                 requesterOwned: visibleSession.requesterOwned,
                 authorizationTargetSessionKey: authorizationTargetKey,
+                controllerOnly: access.basis === "live-controller",
                 expectedSessionId,
               },
               assertSourceCurrent: opts?.assertSourceCurrent,
@@ -656,6 +657,7 @@ export function createSessionsSendTool(opts?: SessionsSendToolOptions): AnyAgent
               await dispatchSessionsSendFollowup(startParams, replyContext, {
                 message,
                 ownChild,
+                persistentChildAccess: access.basis === "parent-lineage",
                 nativeChild: !targetAcpMeta,
                 claimRequesterTurnCompletion: timeoutSeconds === 0,
                 requesterSessionKey: requesterSession.canonicalKey,

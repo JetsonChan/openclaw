@@ -80,6 +80,7 @@ export async function dispatchSessionsSendFollowup(
   options: {
     message: string;
     ownChild: boolean;
+    persistentChildAccess?: boolean;
     nativeChild: boolean;
     claimRequesterTurnCompletion: boolean;
     watch: boolean;
@@ -102,7 +103,7 @@ export async function dispatchSessionsSendFollowup(
   const sameRequester = replyContext.requesterSessionKey === options.requesterSessionKey;
   const requesterTurn =
     options.claimRequesterTurnCompletion &&
-    !params.expectedSessionId &&
+    (!params.expectedSessionId || options.persistentChildAccess) &&
     options.nativeChild &&
     !isCronRunSessionKey(options.requesterSessionKey) &&
     sameRequester &&
@@ -282,7 +283,7 @@ export async function dispatchSessionsSendFollowup(
   if (
     start.ok &&
     options.watch &&
-    !params.expectedSessionId &&
+    (!params.expectedSessionId || options.persistentChildAccess) &&
     replyContext.requesterSessionKey &&
     targetSessionKey &&
     replyContext.requesterSessionKey !== targetSessionKey
