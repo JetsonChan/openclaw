@@ -12,10 +12,14 @@ permissions:
 env:
   # Explicit target assembly. This is the existing build selector, not a
   # dependency resolver; package composition below is the second gate.
+  # Core build entries. Package-excluded first-party plugins are added through
+  # the existing package composition selector below.
   OPENCLAW_BUNDLED_PLUGIN_BUILD_IDS: >-
-    browser,codex,deepseek,document-extract,google,image-generation-core,
-    imessage,memory-core,minimax,ollama,openai,opencode,opencode-go,
-    volcengine,xai,zai
+    browser,codex,document-extract,google,image-generation-core,memory-core,
+    minimax,ollama,openai,opencode-go,xai
+  # Existing packer selector for plugins excluded from the core package.
+  OPENCLAW_INTERNAL_DOCKER_BUILD_PLUGIN_IDS: imessage,deepseek,opencode,volcengine,zai
+  FORK_BUNDLE_PLUGIN_IDS: imessage,deepseek,opencode,volcengine,zai
 
 jobs:
   static:
@@ -35,7 +39,7 @@ jobs:
       - run: pnpm config:channels:check
       - run: pnpm channels:catalog:check
       - run: pnpm test:contracts:channels
-      - run: pnpm tsgo:extensions:test
+      - run: pnpm tsgo:extensions
 
   build:
     name: Selected build and package composition
@@ -56,7 +60,7 @@ jobs:
         shell: bash
         run: |
           args=()
-          IFS=',' read -ra ids <<< "$OPENCLAW_BUNDLED_PLUGIN_BUILD_IDS"
+          IFS=',' read -ra ids <<< "$FORK_BUNDLE_PLUGIN_IDS"
           for id in "${ids[@]}"; do
             id="$(echo "$id" | tr -d '[:space:]')"
             [ -n "$id" ] && args+=(--bundle-plugin "$id")
