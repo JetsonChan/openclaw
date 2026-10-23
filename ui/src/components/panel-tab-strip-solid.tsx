@@ -218,6 +218,11 @@ function TabGroupView<T extends SolidPanelTabStripTab>(
             // The keyed id is this node's lifetime identity.
             const initialTabId = untrack(() => tab().id);
             const ref = tabs.ref(initialTabId);
+            // Tooltip changes replace the label while retaining this keyed tab.
+            const labelRef = elementRef((element: HTMLElement) => {
+              labels.set(initialTabId, element);
+              return () => labels.delete(initialTabId);
+            });
             const selected = () => tab().id === props.activeId;
             const reorderId = () => tab().reorderId ?? tab().id;
             const draggable = () => Boolean(props.onReorder) && tab().draggable !== false;
@@ -251,13 +256,7 @@ function TabGroupView<T extends SolidPanelTabStripTab>(
                     {props.renderIcon ? props.renderIcon(tab) : tab().icon}
                   </span>
                 </Show>
-                <span
-                  class="tabstrip-tab__label"
-                  ref={elementRef((element: HTMLElement) => {
-                    labels.set(initialTabId, element);
-                    return () => labels.delete(initialTabId);
-                  })}
-                >
+                <span class="tabstrip-tab__label" ref={labelRef}>
                   {tab().label}
                 </span>
                 <Show when={tab().badge}>

@@ -228,7 +228,7 @@ function AppSidebarContent(
         sessions: hostView.sessionDataContext?.sessions.state.result?.sessions ?? [],
       }}
       presented={hostView.navigationVisible}
-      renderDefault={SessionBody}
+      renderDefault={() => <SessionBody />}
     />
   );
   const content = hostView.renderSidebar(Sessions, scroll, {
