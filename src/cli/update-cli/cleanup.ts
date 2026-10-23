@@ -1,11 +1,14 @@
 /** Local recovery retirement. This handler never invokes update or Doctor repair. */
 import { confirm } from "@clack/prompts";
 import {
+  collectUpdateCleanupInventory,
   inspectSessionSqliteRecovery,
   type RecoveryCleanupReport,
 } from "../../commands/doctor-session-sqlite-recovery-inventory.js";
 import { retireSessionSqliteRecovery } from "../../commands/doctor-session-sqlite-retirement.js";
+import { selectUnmanifestedRecovery } from "../../commands/update-cleanup-unmanifested.js";
 import { readSourceConfigBestEffort } from "../../config/io.js";
+import { formatDurationHuman } from "../../infra/format-time/format-duration.js";
 import { defaultRuntime, ExitError, writeRuntimeJson } from "../../runtime.js";
 import { updateMaintenanceError } from "./update-maintenance-error.js";
 
@@ -17,9 +20,15 @@ function renderCleanup(report: RecoveryCleanupReport): void {
     );
   }
   for (const item of report.artifacts) {
+    const age = item.modifiedAt
+      ? `; modified ${formatDurationHuman(Math.max(0, Date.now() - Date.parse(item.modifiedAt)))} ago`
+      : "";
     defaultRuntime.log(
-      `  ${item.outcome}: ${item.path} (${item.bytes} bytes; ${item.reason})${item.detail ? ` ${item.detail}` : ""}`,
+      `  ${item.outcome}: ${item.path} (${item.bytes} bytes${age}; ${item.reason})${item.detail ? ` ${item.detail}` : ""}`,
     );
+    if (item.consequence && item.outcome === "candidate") {
+      defaultRuntime.log(`    ${item.consequence}`);
+    }
   }
   defaultRuntime.log(
     `Candidates: ${report.totals.candidateBytes} bytes; verification required: ${report.totals.verificationRequiredBytes}; protected: ${report.totals.protectedBytes}; blocked: ${report.totals.blockedBytes}.`,
@@ -51,13 +60,23 @@ export async function updateCleanupCommand(options: {
   dryRun?: boolean;
   json?: boolean;
   yes?: boolean;
+  includeUnmanifested?: string[];
 }): Promise<void> {
   let report: RecoveryCleanupReport | undefined;
   try {
-    report = inspectSessionSqliteRecovery({
-      cfg: await readSourceConfigBestEffort(),
-      env: process.env,
-    });
+    const cfg = await readSourceConfigBestEffort();
+    if (options.includeUnmanifested?.length) {
+      const inventory = collectUpdateCleanupInventory({ cfg, env: process.env });
+      selectUnmanifestedRecovery({
+        inventory,
+        cfg,
+        env: process.env,
+        paths: options.includeUnmanifested,
+      });
+      report = inventory.report;
+    } else {
+      report = inspectSessionSqliteRecovery({ cfg, env: process.env });
+    }
     if (!options.dryRun) {
       if (report.artifacts.length === 0 && !options.yes) {
         report.status = "complete";
@@ -67,12 +86,14 @@ export async function updateCleanupCommand(options: {
         report = await retireSessionSqliteRecovery({
           env: process.env,
           preview: report,
+          includeUnmanifested: options.includeUnmanifested,
           readConfig: readSourceConfigBestEffort,
           onProgress: ({ phase, path, index, total, bytes }) => {
             const label = {
               verifying: "Verifying original",
               claiming: "Retiring original",
               "removing-capture": "Removing capture",
+              "removing-unmanifested": "Retiring explicitly selected original",
             }[phase];
             process.stderr.write(`${label} ${index}/${total}: ${path} (${bytes} bytes)\n`);
           },
@@ -92,7 +113,15 @@ export async function updateCleanupCommand(options: {
       }
     }
     if (options.json) {
-      writeRuntimeJson(defaultRuntime, { ...report, dryRun: options.dryRun === true });
+      writeRuntimeJson(defaultRuntime, {
+        ...report,
+        artifacts: report.artifacts.map((item) =>
+          item.modifiedAt
+            ? { ...item, ageMs: Math.max(0, Date.now() - Date.parse(item.modifiedAt)) }
+            : item,
+        ),
+        dryRun: options.dryRun === true,
+      });
     } else {
       renderCleanup(report);
     }

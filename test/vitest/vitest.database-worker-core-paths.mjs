@@ -752,6 +752,7 @@ export const databaseWorkerCoreTestFiles = [
   "src/cli/update-cli.already-current.test.ts",
   "src/cli/update-cli.candidate-activation.test.ts",
   "src/cli/update-cli.candidate-admission.test.ts",
+  "src/cli/update-cli.capture-space.test.ts",
   "src/cli/update-cli.config-convergence.test.ts",
   "src/cli/update-cli.finalizer.test.ts",
   "src/cli/update-cli.fresh-doctor.test.ts",
