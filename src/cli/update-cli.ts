@@ -385,8 +385,10 @@ ${theme.muted("Docs:")} ${formatDocsLink("/cli/update", "docs.openclaw.ai/cli/up
               Boolean(opts.dryRun) || Boolean(inheritOptionFromParent<boolean>(command, "dryRun")),
             json: Boolean(opts.json) || inheritedUpdateJson(command),
             yes: Boolean(opts.yes) || Boolean(inheritOptionFromParent<boolean>(command, "yes")),
-            ...(Array.isArray(opts.includeUnmanifested) && opts.includeUnmanifested.length > 0
-              ? { includeUnmanifested: opts.includeUnmanifested as string[] }
+            ...(Array.isArray(opts.includeUnmanifested) &&
+            opts.includeUnmanifested.every((value) => typeof value === "string") &&
+            opts.includeUnmanifested.length > 0
+              ? { includeUnmanifested: opts.includeUnmanifested }
               : {}),
           });
         },

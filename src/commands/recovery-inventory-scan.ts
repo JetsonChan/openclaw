@@ -1,6 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { performance } from "node:perf_hooks";
+import { hasErrnoCode } from "../infra/errno.js";
 
 /** Diagnostic work allowance only: never retention policy or deletion authority. */
 export class RecoveryInventoryScan {
@@ -43,7 +44,7 @@ export class RecoveryInventoryScan {
         yield entry;
       }
     } catch (error) {
-      if ((error as NodeJS.ErrnoException).code !== "ENOENT") {
+      if (!hasErrnoCode(error, "ENOENT")) {
         this.reasons.add("unreadable-directory");
       }
     } finally {
