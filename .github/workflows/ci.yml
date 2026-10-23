@@ -37,19 +37,18 @@ jobs:
       - run: pnpm channels:catalog:check
       - run: pnpm tsgo:core
       - run: pnpm tsgo:extensions
-      - run: pnpm test test/scripts/bundled-plugin-assets.test.ts --maxWorkers=1
+      - run: pnpm test test/scripts/bundled-plugin-assets.test.ts test/scripts/native-protocol-artifact.test.ts packages/gateway-protocol/src/native-protocol-levels.guard.test.ts --maxWorkers=1
       - run: pnpm test:contracts:channels
       - run: pnpm test:contracts:plugins
       - run: pnpm test:extension imessage
 
   build:
     name: Selected build and package composition
+    needs: static
     runs-on: ubuntu-latest
     timeout-minutes: 90
     steps:
       - uses: actions/checkout@v4
-        with:
-          persist-credentials: false
       - name: Install the pinned toolchain and frozen dependencies
         uses: ./.github/actions/setup-node-env
         with:

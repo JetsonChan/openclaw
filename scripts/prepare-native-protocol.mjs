@@ -41,7 +41,7 @@ function fingerprint(files) {
   return hash.digest("hex");
 }
 
-export async function prepareNativeProtocol({ language = "all", out, check = false } = {}) {
+export async function prepareNativeProtocol({ language = "swift", out, check = false } = {}) {
   if (!fs.existsSync(path.join(root, "packages/gateway-protocol/src/schema/protocol-schemas.ts"))) {
     // Published CLI packages do not contain native source or generator dependencies.
     return;

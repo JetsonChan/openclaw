@@ -18,7 +18,7 @@ import {
 /**
  * Cross-language guard for Gateway protocol version constants.
  *
- * Native Swift/Kotlin clients and dev smoke scripts cannot derive these values
+ * Native Swift clients and dev smoke scripts cannot derive these values
  * from TypeScript at runtime, so this test keeps generated constants
  * and connect payloads aligned with the package source of truth.
  */
@@ -163,27 +163,6 @@ describe("native Gateway protocol levels", () => {
       },
       expectedNodeLevels,
     );
-
-    const androidPath = `${nativeProtocolOutputDirectories.kotlin}/ai/openclaw/app/gateway/GatewayProtocol.kt`;
-    const android = await readRepoFile(androidPath);
-    assertLevelsMatch(
-      androidPath,
-      {
-        min: extractInteger(
-          android,
-          /const val GATEWAY_MIN_PROTOCOL_VERSION = (\d+)/,
-          androidPath,
-          "GATEWAY_MIN_PROTOCOL_VERSION",
-        ),
-        max: extractInteger(
-          android,
-          /const val GATEWAY_PROTOCOL_VERSION = (\d+)/,
-          androidPath,
-          "GATEWAY_PROTOCOL_VERSION",
-        ),
-      },
-      expectedNodeLevels,
-    );
   });
 
   it("uses the min constant for native connect compatibility ranges", async () => {
@@ -223,21 +202,6 @@ describe("native Gateway protocol levels", () => {
       "connect params must advertise GATEWAY_PROTOCOL_VERSION as maxProtocol.",
     );
 
-    const watchPath = "apps/ios/WatchApp/Sources/WatchDirectNode.swift";
-    const watch = await readRepoFile(watchPath);
-    assertPattern(
-      watch,
-      watchPath,
-      /minprotocol: GATEWAY_MIN_PROTOCOL_VERSION/,
-      "Direct Watch HTTP connects must keep the current client protocol floor.",
-    );
-    assertPattern(
-      watch,
-      watchPath,
-      /maxprotocol: GATEWAY_PROTOCOL_VERSION/,
-      "Watch node connects must advertise GATEWAY_PROTOCOL_VERSION as maxProtocol.",
-    );
-
     const swiftWizardPath = "apps/macos/Sources/OpenClawMacCLI/WizardCommand.swift";
     const swiftWizard = await readRepoFile(swiftWizardPath);
     assertPattern(
@@ -251,21 +215,6 @@ describe("native Gateway protocol levels", () => {
       swiftWizardPath,
       /"maxProtocol": ProtoAnyCodable\(GATEWAY_PROTOCOL_VERSION\)/,
       "operator connects must advertise GATEWAY_PROTOCOL_VERSION as maxProtocol.",
-    );
-
-    const androidPath = "apps/android/app/src/main/java/ai/openclaw/app/gateway/GatewaySession.kt";
-    const android = await readRepoFile(androidPath);
-    assertPattern(
-      android,
-      androidPath,
-      /put\("minProtocol", JsonPrimitive\(GATEWAY_MIN_PROTOCOL_VERSION\)\)/,
-      "connect params must advertise GATEWAY_MIN_PROTOCOL_VERSION as minProtocol.",
-    );
-    assertPattern(
-      android,
-      androidPath,
-      /put\("maxProtocol", JsonPrimitive\(GATEWAY_PROTOCOL_VERSION\)\)/,
-      "connect params must advertise GATEWAY_PROTOCOL_VERSION as maxProtocol.",
     );
   });
 

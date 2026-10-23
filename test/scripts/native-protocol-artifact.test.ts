@@ -22,10 +22,14 @@ describe("native protocol build artifacts", () => {
     fs.symlinkSync(path.join(root, "node_modules"), path.join(fixture, "node_modules"), "junction");
     const alias = path.join(tempDirs.make("native-protocol-entry-"), "source");
     fs.symlinkSync(fixture, alias, "junction");
-    const generate = (check = false) =>
+    const generate = (check = false, language?: string) =>
       execFileSync(
         process.execPath,
-        [path.join(alias, "scripts/prepare-native-protocol.mjs"), ...(check ? ["--check"] : [])],
+        [
+          path.join(alias, "scripts/prepare-native-protocol.mjs"),
+          ...(language ? ["--language", language] : []),
+          ...(check ? ["--check"] : []),
+        ],
         { cwd: fixture, encoding: "utf8" },
       );
     const swiftPath = path.join(
@@ -37,6 +41,9 @@ describe("native protocol build artifacts", () => {
       "apps/android/app/build/generated/openclaw-protocol/ai/openclaw/app/gateway/GatewayProtocol.kt",
     );
     expect(generate(true)).toContain("contract and determinism checked");
+    expect(fs.existsSync(path.join(fixture, "apps/android"))).toBe(false);
+    // Kotlin remains an explicit code-generation contract, not a default client build.
+    generate(true, "kotlin");
     const swift = fs.readFileSync(swiftPath, "utf8");
     const kotlin = fs.readFileSync(kotlinPath, "utf8");
     expect(() =>
@@ -72,6 +79,7 @@ describe("native protocol build artifacts", () => {
     );
     generate();
     expect(fs.readFileSync(swiftPath, "utf8")).toContain("GATEWAY_PROTOCOL_VERSION = 777");
+    generate(false, "kotlin");
     expect(fs.readFileSync(kotlinPath, "utf8")).toContain("GATEWAY_PROTOCOL_VERSION = 777");
   });
 });
