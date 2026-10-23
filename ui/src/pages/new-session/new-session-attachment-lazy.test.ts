@@ -84,7 +84,7 @@ it("keeps the draft usable through a cold preview retry and retires it before th
   );
   vi.spyOn(staleChunkReload, "retryStaleChunkReloadWhenReachable").mockImplementation(
     async (options) => {
-      detailImport.canReload = options.canReload;
+      detailImport.canReload = options?.canReload ?? (() => false);
       await detailImport.recovery.promise;
       return false;
     },
