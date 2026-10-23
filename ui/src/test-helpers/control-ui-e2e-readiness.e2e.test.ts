@@ -80,7 +80,8 @@ suite.define(() => {
                   '<button class="chat-header-session-menu__trigger" aria-expanded="false">Session actions</button>' +
                   '<div class="oc-menu" role="menu" hidden><button role="menuitem">Panels</button></div>' +
                   '</openclaw-chat-header-session-menu></div><div class="chat-mobile-host" hidden>Panel sheet</div>'
-                : '<div class="sidebar-region__panels-toggle"><button aria-expanded="false">Panels</button></div>';
+                : '<div class="sidebar-region__header">Session</div>' +
+                  '<div class="sidebar-region__panels-toggle"><button aria-expanded="false">Panels</button></div>';
               const trigger = pane.querySelector("button")!;
               trigger.addEventListener("click", () => {
                 pane.setAttribute(
