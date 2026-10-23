@@ -54,10 +54,15 @@ async function openSessionActions(pane: Locator): Promise<Locator> {
   return menu;
 }
 
-export async function openChatPanels(scope: Page | Locator): Promise<Locator> {
+export async function openChatPanels(
+  scope: Page | Locator,
+  presentation: "mobile" | "desktop",
+): Promise<Locator> {
   const pane = nativePane(scope);
-  if (await pane.locator(".agent-chat__header--mobile").isVisible()) {
+  // The scenario owns its target layout; old controls may remain visible during a viewport change.
+  if (presentation === "mobile") {
     const trigger = pane.locator(".agent-chat__header--mobile .chat-header-session-menu__trigger");
+    await trigger.waitFor({ state: "visible" });
     if (!(await pane.locator(".chat-mobile-host").isVisible())) {
       await selectMenuItem(await openSessionActions(pane), "Panels");
     }
@@ -66,6 +71,7 @@ export async function openChatPanels(scope: Page | Locator): Promise<Locator> {
   const trigger = pane
     .locator(".sidebar-region__panels-toggle")
     .getByRole("button", { name: "Panels", exact: true });
+  await trigger.waitFor({ state: "visible" });
   if ((await trigger.getAttribute("aria-expanded")) !== "true") {
     await trigger.click();
   }
@@ -115,7 +121,7 @@ async function selectNativeLayoutAction(pane: Locator, name: string | RegExp): P
         .getByRole("button", { name: "Close", exact: true })
         .click();
     } else if (mobile) {
-      await openChatPanels(pane);
+      await openChatPanels(pane, "mobile");
     } else {
       await pane
         .locator(".sidebar-region__panels-toggle")
@@ -141,7 +147,7 @@ async function selectNativeLayoutAction(pane: Locator, name: string | RegExp): P
   ] as const;
   const panel = panels.find(([, action]) => matches(action));
   if (panel) {
-    await openChatPanels(pane);
+    await openChatPanels(pane, mobile ? "mobile" : "desktop");
     if (mobile) {
       await host.getByRole("button", { name: "Panels", exact: true }).click();
     }
