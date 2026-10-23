@@ -7,8 +7,11 @@ import {
   collectNestedErrorCandidates,
   extractErrorCode,
 } from "@openclaw/normalization-core/error-coercion";
+import { PreparedModelRuntimeRecoveryError } from "../../agents/prepared-model-runtime-admission-errors.js";
 import { SESSION_RESTART_RECOVERY_TOMBSTONE_ERROR_CODE } from "../../config/sessions/work-start-error.js";
 import { computeBackoff } from "../../infra/backoff.js";
+import { decodeIngressRetryError } from "./ingress-queue.codec.js";
+import type { ChannelIngressRetryState } from "./ingress-queue.types.js";
 
 export const DEFAULT_INGRESS_RETRY_MAX_ATTEMPTS = 8;
 export const DEFAULT_INGRESS_RETRY_DEAD_LETTER_MIN_AGE_MS = 24 * 60 * 60 * 1000;
@@ -27,6 +30,7 @@ type IngressRetryEventFacts = {
   attempts?: number;
   lastAttemptAt?: number;
   lastError?: string;
+  retry?: ChannelIngressRetryState;
 };
 
 export type IngressNonRetryableFailure = {
@@ -45,6 +49,8 @@ type IngressFailureDisposition =
       kind: "release";
       attempt: number;
       message: string;
+      recordAttempt?: boolean;
+      retry?: ChannelIngressRetryState;
     };
 
 /** Remaining backoff delay before a released event may be claimed again. */
@@ -53,6 +59,10 @@ export function resolveIngressRetryDelayMs(
   config?: IngressRetryPolicyConfig,
   now = Date.now(),
 ): number {
+  const retry = event.retry ?? decodeIngressRetryError(event.lastError).retry;
+  if (retry?.nextEligibleAt !== undefined) {
+    return Math.max(0, retry.nextEligibleAt - now);
+  }
   const baseMs = config?.baseMs ?? DEFAULT_INGRESS_RETRY_BASE_MS;
   const maxMs = config?.maxMs ?? DEFAULT_INGRESS_RETRY_MAX_MS;
   const attempts = event.attempts ?? 0;
@@ -103,17 +113,39 @@ export function resolveIngressFailureDisposition(params: {
       attempt,
     };
   }
-  const errorCodes = new Set(collectNestedErrorCandidates(params.err).map(extractErrorCode));
+  const errors = collectNestedErrorCandidates(params.err);
+  const previousRetry = params.event.retry ?? decodeIngressRetryError(params.event.lastError).retry;
+  const recovery = errors.find(
+    (error): error is PreparedModelRuntimeRecoveryError =>
+      error instanceof PreparedModelRuntimeRecoveryError,
+  );
+  if (recovery) {
+    const attempted = recovery.reason === "attempt-failed";
+    const recoveryFailures = (previousRetry?.recoveryFailures ?? 0) + (attempted ? 1 : 0);
+    if (attempted && recoveryFailures >= 2) {
+      return { kind: "fail", reason: "runtime-recovery-failed", message, attempt };
+    }
+    return {
+      kind: "release",
+      attempt: attempted ? attempt : (params.event.attempts ?? 0),
+      message,
+      recordAttempt: attempted,
+      retry: { recoveryFailures, nextEligibleAt: recovery.nextEligibleAt },
+    };
+  }
+  const errorCodes = new Set(errors.map(extractErrorCode));
   // Retrying this terminal generation blocks the authorized reset behind it.
-  // Failed runtime recovery gets one replay, rather than renewing typing for a day.
   const reason = errorCodes.has(SESSION_RESTART_RECOVERY_TOMBSTONE_ERROR_CODE)
     ? "restart-recovery-tombstone"
-    : errorCodes.has("PREPARED_MODEL_RUNTIME_RECOVERY_FAILED") && attempt >= 2
-      ? "runtime-recovery-failed"
-      : shouldDeadLetterRetryableIngressEvent(params.event, attempt, params.config, now)
-        ? "retry-limit-exceeded"
-        : undefined;
+    : shouldDeadLetterRetryableIngressEvent(params.event, attempt, params.config, now)
+      ? "retry-limit-exceeded"
+      : undefined;
   return reason
     ? { kind: "fail", reason, message, attempt }
-    : { kind: "release", attempt, message };
+    : {
+        kind: "release",
+        attempt,
+        message,
+        ...(previousRetry ? { retry: { recoveryFailures: previousRetry.recoveryFailures } } : {}),
+      };
 }

@@ -2,7 +2,12 @@
 import { sleepWithAbort } from "@openclaw/retry";
 import { hasSqliteWorkerOutcomeUnknown } from "../../infra/sqlite-worker-contract.js";
 import { IngressAdoptionLostError, isIngressAdoptionLostError } from "./ingress-drain-state.js";
-import type { ChannelIngressQueue, ChannelIngressQueueClaim } from "./ingress-queue.types.js";
+import { encodeIngressRetryError } from "./ingress-queue.codec.js";
+import type {
+  ChannelIngressQueue,
+  ChannelIngressQueueClaim,
+  ChannelIngressRetryState,
+} from "./ingress-queue.types.js";
 import {
   DEFAULT_INGRESS_RETRY_BASE_MS,
   DEFAULT_INGRESS_RETRY_MAX_MS,
@@ -98,14 +103,26 @@ export function createIngressWriter<TPayload, TMetadata, TCompletedMetadata>(
 
   const releaseClaim = (
     claim: ChannelIngressQueueClaim<TPayload, TMetadata>,
-    releaseOptions?: { lastError?: string; recordAttempt?: boolean },
-  ) =>
-    commitClaimWriteWithRetry({
+    releaseOptions?: {
+      lastError?: string;
+      recordAttempt?: boolean;
+      retry?: ChannelIngressRetryState;
+    },
+  ) => {
+    const { retry, ...release } = releaseOptions ?? {};
+    const lastError = encodeIngressRetryError(release.lastError, retry);
+    return commitClaimWriteWithRetry({
       claim,
       label: "release",
-      write: () => queue.release(claim, { ...releaseOptions, releasedAt: now() }),
+      write: () =>
+        queue.release(claim, {
+          ...release,
+          ...(lastError === undefined ? {} : { lastError }),
+          releasedAt: now(),
+        }),
       falseMeansReclaimed: false,
     });
+  };
 
   const failClaim = (
     claim: ChannelIngressQueueClaim<TPayload, TMetadata>,

@@ -4,7 +4,7 @@ import { usePreparedModelRuntimeHarness } from "./prepared-model-runtime.test-ha
 import { isDeepStrictEqual } from "node:util";
 import { describe, expect, it, vi } from "vitest";
 import { createDeferred } from "../../test/helpers/promise.js";
-import { createChannelIngressDrain } from "../channels/message/ingress-drain.js";
+import { createChannelIngressDrainOwner } from "../channels/message/ingress-drain.js";
 import {
   createTestIngressQueue,
   withTempState,
@@ -106,53 +106,87 @@ describe("prepared model runtime reload auth adoption", () => {
     expect(mocks.resolveAmbientCredentials).toHaveBeenCalledTimes(3);
   });
 
-  it("retains an unrecoverable inbound message as a failed row after one retry", async () => {
-    await start();
-    const failure = new Error("configured model publication timed out");
-    mocks.resolveAmbientCredentials.mockRejectedValue(failure);
-    mutate();
-    await expect(loadDispatch({ agentId: "default" })).rejects.toBe(failure);
+  it.each(["recovers", "fails"] as const)(
+    "%s after the next eligible real recovery without charging backoff replays",
+    async (outcome) => {
+      let now = 10_000;
+      const clock = vi.spyOn(Date, "now").mockImplementation(() => now);
+      try {
+        await start();
+        const failure = new Error("configured model publication timed out");
+        mocks.resolveAmbientCredentials.mockRejectedValue(failure);
+        mutate();
+        await expect(loadDispatch({ agentId: "default" })).rejects.toBe(failure);
+        mocks.resolveAmbientCredentials.mockClear();
 
-    await withTempState(async (stateDir) => {
-      let now = 1_000;
-      const queue = createTestIngressQueue(stateDir, { now: () => now });
-      await queue.enqueue("unavailable", { text: "retained request" });
-      const log = vi.fn();
-      const drain = createChannelIngressDrain({
-        queue,
-        now: () => now,
-        onLog: log,
-        dispatchClaimedEvent: async () => {
-          await loadDispatch({ agentId: "default" });
-        },
-      });
-      try {
-        expect(await drain.drainOnce()).toEqual({ started: 1 });
-        await drain.waitForIdle();
-        expect(await queue.listPending()).toMatchObject([{ id: "unavailable", attempts: 1 }]);
-        now += 1_000;
-        expect(await drain.drainOnce()).toEqual({ started: 1 });
-        await drain.waitForIdle();
-        expect(await queue.listPending()).toEqual([]);
-        expect(await queue.listFailed?.()).toMatchObject([
-          {
-            id: "unavailable",
-            payload: { text: "retained request" },
-            reason: "runtime-recovery-failed",
-          },
-        ]);
-        expect(log).toHaveBeenCalledWith(expect.stringContaining("runtime-recovery-failed"));
+        await withTempState(async (stateDir) => {
+          const queue = createTestIngressQueue(stateDir, { now: () => now });
+          await queue.enqueue("unavailable", { text: "retained request" });
+          const log = vi.fn();
+          const createDrain = () =>
+            createChannelIngressDrainOwner({
+              queue,
+              now: () => now,
+              onLog: log,
+              dispatchClaimedEvent: async () => {
+                await loadDispatch({ agentId: "default" });
+              },
+            });
+          let drain = createDrain();
+          try {
+            expect(await drain.drainOnce()).toEqual({ started: 1 });
+            await drain.waitForIdle();
+            expect(mocks.resolveAmbientCredentials).toHaveBeenCalledTimes(1);
+            expect(await queue.listPending()).toMatchObject([{ id: "unavailable", attempts: 1 }]);
+            now += 1_000;
+            expect(await drain.drainOnce()).toEqual({ started: 0 });
+            // An already-claimed replay must also preserve the real-attempt budget.
+            const replay = await queue.claim("unavailable");
+            expect(replay).not.toBeNull();
+            drain.dispatchClaimed(replay!, Promise.resolve());
+            await drain.waitForIdle();
+            expect(mocks.resolveAmbientCredentials).toHaveBeenCalledTimes(1);
+            const [pending] = await queue.listPending();
+            expect(pending).toMatchObject({
+              id: "unavailable",
+              attempts: 1,
+              retry: { recoveryFailures: 1, nextEligibleAt: 15_000 },
+            });
+            drain.dispose();
+            drain = createDrain();
+            expect(await drain.drainOnce()).toEqual({ started: 0 });
+            now = pending!.retry!.nextEligibleAt!;
+            if (outcome === "recovers") {
+              mocks.resolveAmbientCredentials.mockReturnValue({});
+            }
+            expect(await drain.drainOnce()).toEqual({ started: 1 });
+            await drain.waitForIdle();
+            expect(mocks.resolveAmbientCredentials).toHaveBeenCalledTimes(2);
+            expect(await queue.listPending()).toEqual([]);
+            if (outcome === "recovers") {
+              expect(await queue.listFailed?.()).toEqual([]);
+              expect(await queue.enqueue("unavailable", { text: "duplicate" })).toMatchObject({
+                kind: "completed",
+              });
+            } else {
+              expect(await queue.listFailed?.()).toMatchObject([
+                {
+                  id: "unavailable",
+                  payload: { text: "retained request" },
+                  reason: "runtime-recovery-failed",
+                },
+              ]);
+              expect(log).toHaveBeenCalledWith(expect.stringContaining("runtime-recovery-failed"));
+            }
+          } finally {
+            drain.dispose();
+          }
+        });
       } finally {
-        drain.dispose();
+        clock.mockRestore();
       }
-      const restarted = createChannelIngressDrain({ queue, dispatchClaimedEvent: vi.fn() });
-      try {
-        expect(await restarted.drainOnce()).toEqual({ started: 0 });
-      } finally {
-        restarted.dispose();
-      }
-    });
-  });
+    },
+  );
 
   it("does not record an obsolete catalog attempt after its owner is superseded", async () => {
     mocks.configuredAgentIds = ["default"];

@@ -1,5 +1,6 @@
 import { coerceErrorMessage } from "@openclaw/normalization-core/error-coercion";
 import { describe, expect, it } from "vitest";
+import { PreparedModelRuntimeRecoveryError } from "../../agents/prepared-model-runtime-admission-errors.js";
 import {
   DEFAULT_INGRESS_RETRY_DEAD_LETTER_MIN_AGE_MS,
   DEFAULT_INGRESS_RETRY_MAX_ATTEMPTS,
@@ -29,18 +30,57 @@ function disposition(
 }
 
 describe("ingress retry policy", () => {
-  it("bounds failed runtime recovery to two attempts without waiting a day", () => {
-    const error = wrapError(
-      codedError("runtime recovery failed", "PREPARED_MODEL_RUNTIME_RECOVERY_FAILED"),
-    );
-    expect(disposition(error, 0)).toMatchObject({ kind: "release", attempt: 1 });
-    expect(disposition(error, 1)).toMatchObject({
+  it("counts real recovery failures independently of other dispatch attempts", () => {
+    const error = wrapError(new PreparedModelRuntimeRecoveryError("main", "attempt-failed", 7_000));
+    expect(disposition(error, 8)).toMatchObject({
+      kind: "release",
+      attempt: 9,
+      recordAttempt: true,
+      retry: { recoveryFailures: 1, nextEligibleAt: 7_000 },
+    });
+    expect(
+      disposition(error, 8, {
+        event: { receivedAt: 1_000, attempts: 8, retry: { recoveryFailures: 1 } },
+      }),
+    ).toMatchObject({
       kind: "fail",
       reason: "runtime-recovery-failed",
-      attempt: 2,
     });
-    expect(disposition(new Error("runtime recovery failed"), 1)).toMatchObject({ kind: "release" });
+    expect(
+      disposition(codedError("unavailable", "PREPARED_MODEL_RUNTIME_RECOVERY_FAILED"), 1),
+    ).toMatchObject({ kind: "release" });
   });
+
+  it.each(["projected", "opaque"])(
+    "preserves backoff and recovery budget in %s queue records",
+    (format) => {
+      const retry = { recoveryFailures: 1, nextEligibleAt: 7_000 };
+      const event = {
+        receivedAt: 1_000,
+        attempts: 1,
+        lastError: "failed",
+        lastAttemptAt: 1_000,
+        ...(format === "projected"
+          ? { retry }
+          : {
+              lastError:
+                'OPENCLAW_CHANNEL_INGRESS_RETRY_V1:{"message":"failed","recoveryFailures":1,"nextEligibleAt":7000}',
+            }),
+      };
+      expect(
+        disposition(new PreparedModelRuntimeRecoveryError("main", "backoff", 7_000), 1, {
+          event,
+        }),
+      ).toMatchObject({ kind: "release", attempt: 1, recordAttempt: false, retry });
+      expect(resolveIngressRetryDelayMs(event, undefined, 2_000)).toBe(5_000);
+      expect(resolveIngressRetryDelayMs(event, undefined, 7_000)).toBe(0);
+      expect(
+        disposition(new PreparedModelRuntimeRecoveryError("main", "attempt-failed", 12_000), 1, {
+          event,
+        }),
+      ).toMatchObject({ kind: "fail", reason: "runtime-recovery-failed" });
+    },
+  );
 
   it.each([
     {

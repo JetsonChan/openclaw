@@ -780,10 +780,13 @@ describe("catalog-worker replacement demand", () => {
         if (outcome === "failed") {
           await shared.catch(() => undefined);
           await expect(foreground).rejects.toMatchObject({
-            code: "PREPARED_MODEL_RUNTIME_RECOVERY_FAILED",
+            reason: "attempt-failed",
             cause: failure,
           });
-          await expect(background).rejects.toBe(failure);
+          await expect(background).rejects.toMatchObject({
+            reason: "attempt-failed",
+            cause: failure,
+          });
           await expect(dispatch("scheduled")).rejects.toThrow("was not published");
           expect(mocks.resolveAmbientCredentials).toHaveBeenCalledTimes(1);
           return;

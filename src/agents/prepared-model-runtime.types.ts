@@ -288,6 +288,7 @@ export type PreparedModelRuntimeOwner = {
     scheduledAttempted: boolean;
     retryAfter: number;
     replacementGateId?: PreparedModelRuntimeReplacementGateId;
+    pending?: Promise<void>;
   };
   /** The configured publication owner recovers when an idle Gateway lender retires. */
   onPluginGenerationRetired?: () => void;
