@@ -21,11 +21,16 @@ const mcpLoad = vi.hoisted(() => ({
   requested: vi.fn(),
   fail: false,
 }));
+// mock-isolation: Keep the controlled MCP host and deferred import independent of the real sandbox renderer.
 vi.mock("../mcp-app-view.tsx", async () => {
   mcpLoad.requested();
   await mcpLoad.promise;
   return {
-    McpAppView: (props: Parameters<typeof import("../mcp-app-view.tsx").McpAppView>[0]) => {
+    McpAppView: (
+      props: Parameters<typeof import("../mcp-app-view.tsx").McpAppView>[0] & {
+        "onOpenclaw-mcp-app-view-expired"?: (event: Event) => void;
+      },
+    ) => {
       if (mcpLoad.fail) {
         throw new Error("MCP renderer temporarily unavailable");
       }
@@ -38,7 +43,7 @@ vi.mock("../mcp-app-view.tsx", async () => {
           prop:fillContainer={props.fillContainer}
           prop:surface={props.surface}
           title={props.title}
-          onOpenclaw-mcp-app-view-expired={(event) =>
+          onOpenclaw-mcp-app-view-expired={(event: Event) =>
             props["onOpenclaw-mcp-app-view-expired"]?.(event)
           }
         />
