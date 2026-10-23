@@ -11,6 +11,7 @@ import {
   setActivePluginRegistry,
 } from "../../plugins/runtime.js";
 import { createPluginRecord } from "../../plugins/status.test-fixtures.js";
+import * as profiles from "../../state/user-profile-list.js";
 import {
   createCoreGatewayMethodDescriptors,
   createGatewayMethodRegistry,
@@ -21,7 +22,10 @@ import { pluginHostHookHandlers } from "./plugin-host-hooks.js";
 import type { GatewayClient, GatewayRequestContext } from "./types.js";
 
 describe("plugin host hook registry ownership", () => {
-  afterEach(() => clearActivePluginRegistry());
+  afterEach(async () => {
+    vi.restoreAllMocks();
+    await clearActivePluginRegistry();
+  });
 
   it.each([
     ["plugins.uiDescriptors", WRITE_SCOPE],
@@ -42,7 +46,9 @@ describe("plugin host hook registry ownership", () => {
             api.session.controls.registerSessionAction({
               id: "describe",
               requiredScopes: [requiredScope],
-              handler: () => ({ result: { label } }),
+              handler: ({ client }) => ({
+                result: { label, sharedGateway: client?.sharedGateway ?? false },
+              }),
             });
           },
         });
@@ -58,6 +64,8 @@ describe("plugin host hook registry ownership", () => {
         createCoreGatewayMethodDescriptors(pluginHostHookHandlers),
         local,
       );
+      // Session actions receive the host's shared-Gateway fact for owner-only reads.
+      vi.spyOn(profiles, "hasMultipleResidentSessionSharingIdentities").mockReturnValue(true);
       const respond = vi.fn();
       try {
         await handleGatewayRequest({
@@ -80,7 +88,7 @@ describe("plugin host hook registry ownership", () => {
         expect(respond.mock.calls[0]?.slice(0, 2)).toMatchObject([
           true,
           method === "plugins.sessionAction"
-            ? { ok: true, result: { label: "Local registry" } }
+            ? { ok: true, result: { label: "Local registry", sharedGateway: true } }
             : {
                 ok: true,
                 generation: localGeneration,

@@ -16,6 +16,7 @@ import { isPluginJsonValue } from "../../plugins/host-hooks.js";
 import { getPluginRegistryVersion } from "../../plugins/runtime-state.js";
 import { getPluginRegistryForContext } from "../../plugins/runtime/gateway-request-scope.js";
 import { validateJsonSchemaValue, type JsonSchemaValue } from "../../plugins/schema-validator.js";
+import { hasMultipleResidentSessionSharingIdentities } from "../../state/user-profile-list.js";
 import {
   listControlUiPluginDescriptors,
   listControlUiLinkReaders,
@@ -23,6 +24,7 @@ import {
   listControlUiPluginWidgetKinds,
 } from "../control-ui-plugin-tabs.js";
 import { authorizeOperatorScopesForRequiredScope } from "../method-scopes.js";
+import { resolveOperatorRoleAgents } from "../operator-role-policy.js";
 import { WRITE_SCOPE } from "../operator-scopes.js";
 import { resolveRequestedSessionAgentId } from "../session-request-agent.js";
 import { resolveStoredSessionKeyForAgentStore } from "../session-store-key.js";
@@ -146,6 +148,7 @@ export const pluginHostHookHandlers: GatewayRequestHandlers = {
             return;
           }
         }
+        const roleAgents = resolveOperatorRoleAgents(client ?? null, context.getRuntimeConfig());
         const result = await registration.action.handler({
           pluginId,
           actionId,
@@ -155,6 +158,8 @@ export const pluginHostHookHandlers: GatewayRequestHandlers = {
           client: {
             ...(client?.connId ? { connId: client.connId } : {}),
             scopes: [...scopes],
+            ...(roleAgents ? { agents: [...roleAgents] } : {}),
+            ...(hasMultipleResidentSessionSharingIdentities() ? { sharedGateway: true } : {}),
           },
         });
         if (result !== undefined && !isRecord(result)) {
