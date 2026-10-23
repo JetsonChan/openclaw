@@ -170,6 +170,7 @@ export const additionalDialogScenes: Scene[] = [
         await dialog.waitFor({ state: "detached" });
         await expect.poll(() => page.locator("iframe").count()).toBe(0);
         fixture.nextExpiryAt = Date.now() + 30_100;
+        console.log("Browser auth recovered through the sign-in popup");
       } finally {
         await popup.close();
       }
