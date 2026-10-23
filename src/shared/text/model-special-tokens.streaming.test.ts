@@ -3,7 +3,7 @@ import {
   assistantVisibleTextFilters,
   sanitizeAssistantVisibleTextWithProfile,
 } from "./assistant-visible-text.js";
-import { modelSpecialTokensTextFilter, stripModelSpecialTokens } from "./model-special-tokens.js";
+import { modelSpecialTokensTextFilter } from "./model-special-tokens.js";
 import { createTextProjection } from "./text-projection.js";
 
 function streamSource(source: string, chunkSize: number) {
@@ -110,7 +110,7 @@ describe("model special token streaming", () => {
     ],
     ["code inside a token body", "[a <|`x`|>]: /url x", "[a <|`x`|>]: /url x"],
   ])("keeps prefix and delta parity across every split of %s", (_name, source, expected) => {
-    expect(stripModelSpecialTokens(source)).toBe(expected);
+    expect(modelSpecialTokensTextFilter.transform(source)).toBe(expected);
     const check = (chunks: string[]) => {
       const projection = createTextProjection([modelSpecialTokensTextFilter]);
       let prefix = "";
@@ -119,7 +119,7 @@ describe("model special token streaming", () => {
         prefix += chunk;
         const result = projection.append(chunk);
         delivered = result.delta === null ? result.text : delivered + result.delta;
-        const batch = stripModelSpecialTokens(prefix);
+        const batch = modelSpecialTokensTextFilter.transform(prefix);
         expect(result.text, JSON.stringify(chunks)).toBe(batch);
         expect(delivered, JSON.stringify(chunks)).toBe(batch);
       }
@@ -138,7 +138,7 @@ describe("model special token streaming", () => {
   });
 
   it.each(sources)("matches the batch transform for %s", (name, source) => {
-    const batch = stripModelSpecialTokens(source);
+    const batch = modelSpecialTokensTextFilter.transform(source);
     for (const chunkSize of chunkSizes) {
       const result = streamSource(source, chunkSize);
       expect(result.text, `${name} at ${chunkSize} chars`).toBe(batch);
@@ -173,7 +173,7 @@ describe("model special token streaming", () => {
       for (let end = 1; end <= source.length; end++) {
         projection.append(source.slice(end - 1, end));
         expect(projection.text, `prefix ${end} of ${JSON.stringify(source)}`).toBe(
-          stripModelSpecialTokens(source.slice(0, end)),
+          modelSpecialTokensTextFilter.transform(source.slice(0, end)),
         );
       }
     }
@@ -193,7 +193,7 @@ describe("model special token streaming", () => {
 
   it("matches the batch transform when a late definition revokes a kept token", () => {
     const source = "![a `<|assistant|>`][id]\n\n[id]: /url\n";
-    const batch = stripModelSpecialTokens(source);
+    const batch = modelSpecialTokensTextFilter.transform(source);
     expect(batch).toBe("![a ``][id]\n\n[id]: /url\n");
     for (const chunkSize of chunkSizes) {
       const result = streamSource(source, chunkSize);
@@ -254,7 +254,7 @@ describe("model special token streaming", () => {
 
   it("matches the batch transform when a standalone definition revokes a kept token", () => {
     const source = "[a `<|assistant|>`]: /url";
-    const batch = stripModelSpecialTokens(source);
+    const batch = modelSpecialTokensTextFilter.transform(source);
     expect(batch).toBe("[a ``]: /url");
     for (const chunkSize of chunkSizes) {
       const result = streamSource(source, chunkSize);
@@ -265,7 +265,7 @@ describe("model special token streaming", () => {
 
   it("matches the batch transform when an escaped bracket precedes a definition token", () => {
     const source = "[a \\] `<|assistant|>`]: /url";
-    const batch = stripModelSpecialTokens(source);
+    const batch = modelSpecialTokensTextFilter.transform(source);
     expect(batch).toBe("[a \\] ``]: /url");
     const projection = createTextProjection([modelSpecialTokensTextFilter]);
     projection.append("[a \\] `<|assistant|>`");
@@ -274,7 +274,7 @@ describe("model special token streaming", () => {
 
   it("restores a stripped token when a definition suffix invalidates it", () => {
     const source = "![a `<|assistant|>`][id]\n\n[id]: /url x";
-    const batch = stripModelSpecialTokens(source);
+    const batch = modelSpecialTokensTextFilter.transform(source);
     expect(batch).toBe("![a `<|assistant|>`][id]\n\n[id]: /url x");
     for (const chunkSize of chunkSizes) {
       const result = streamSource(source, chunkSize);
