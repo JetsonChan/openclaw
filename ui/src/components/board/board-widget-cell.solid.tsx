@@ -11,7 +11,6 @@ import {
   Match,
 } from "solid-js";
 import {
-  ensureCustomElementDefined,
   isOptionalElementDefined,
   createLazyCustomElementRequests,
 } from "../../app/lazy-custom-element.ts";
@@ -54,7 +53,6 @@ import { BoardWidgetMenu } from "./board-widget-menu.tsx";
 
 registerEnglishCatalog(registerBoardEnglish);
 
-const loadMcpAppView = () => import("../mcp-app-view.tsx");
 const cells = new WeakMap<HTMLElement, BoardWidgetCellHandle>();
 
 export function boardWidgetPresentationReady(host: HTMLElement): boolean {
@@ -241,10 +239,10 @@ function BoardWidgetCellContent(
     focusWidget: () => widgetRoot()?.focus(),
     selectMenuItem,
     async teardown() {
-      await mcpElement?.teardown?.();
+      await mcpElement?.teardown();
     },
     restartAfterTeardown() {
-      mcpElement?.restartAfterTeardown?.();
+      mcpElement?.restartAfterTeardown();
     },
   });
   createEffect(
@@ -258,9 +256,6 @@ function BoardWidgetCellContent(
       frame.activityChanged();
       for (const element of CORE_BOARD_WIDGET_ELEMENTS) {
         loader.requestWhileActive(element, isActive && coreWidget === element);
-      }
-      if (widget?.contentKind === "mcp-app") {
-        void ensureCustomElementDefined("mcp-app-view", loadMcpAppView).catch(() => undefined);
       }
     },
   );

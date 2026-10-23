@@ -13,6 +13,8 @@ export const uiIsolatedTestFiles = [
   "ui/src/components/app-sidebar.catalog-events.test.ts",
   // The catalog suite exceeds the CI deadline in a shared Bun worker.
   "ui/src/components/app-sidebar.catalog.test.ts",
+  // The held MCP renderer import must not be preloaded by another suite.
+  "ui/src/components/board/board-widget-cell-mcp-app.test.tsx",
   "ui/src/components/gateway-url-confirmation.test.ts",
   "ui/src/components/link-reader-title-tooltip.test.ts",
   // Import rejection fixtures must not poison the shared module registry.
