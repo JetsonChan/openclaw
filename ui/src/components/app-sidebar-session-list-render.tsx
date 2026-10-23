@@ -24,15 +24,10 @@ import {
   renderPendingSessionCreateRow,
 } from "./app-sidebar-session-row-render.tsx";
 import { renderSessionSection as SessionSection } from "./app-sidebar-session-section-render.tsx";
-import { SIDEBAR_SESSION_PAGE_SIZE } from "./app-sidebar-session-types.ts";
 import { areSessionCatalogsSettled } from "./session-data-catalog.ts";
 
-/** Fetching a page is useless if the new rows land behind a section's local cap,
- *  so an explicit roster load reveals a page in every section too -- otherwise
- *  the click can look like undefined happened. */
 function RosterLoadMore(props: {
   host: SidebarSessionListHost;
-  sections: RenderableSessionSection[];
   hasMore: boolean;
   loading: boolean;
 }) {
@@ -47,23 +42,7 @@ function RosterLoadMore(props: {
           }
           disabled={props.loading}
           aria-busy={props.loading ? "true" : "false"}
-          onClick={() => {
-            const host = props.host;
-            const sections = props.sections;
-            // The request owner changes before the DOM commits the disabled attribute.
-            // A repeated activation must not reveal local rows during that read.
-            if (host.sessionData.sessionsLoading) {
-              return;
-            }
-            void host.sessionData.loadMoreSidebarSessions().then(() => {
-              for (const section of sections) {
-                host.setVisibleSessionLimit(
-                  section.id,
-                  section.visibleLimit + SIDEBAR_SESSION_PAGE_SIZE,
-                );
-              }
-            });
-          }}
+          onClick={() => void props.host.loadMoreSidebarSessions()}
         >
           {props.loading ? <span class="session-run-spinner" aria-hidden="true" /> : undefined}
           {props.loading ? t("common.loading") : t("chat.selectors.loadMoreRosterSessions")}
@@ -171,7 +150,6 @@ export function renderSessionList(params: {
       {renderSessionListBody(params)}
       <RosterLoadMore
         host={host()}
-        sections={params.sections}
         hasMore={params.nativeSessionsHaveMore}
         loading={params.nativeSessionsLoading}
       />
