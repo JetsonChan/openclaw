@@ -10,7 +10,6 @@ import type {
   ChatComposerCapabilityMenuProps,
 } from "../chat/components/chat-composer-plus-menu.types.ts";
 import { NewSessionComposerTextareaContext } from "./composer-textarea-context.ts";
-import type { NewSessionComposerOptions } from "./composer.tsx";
 import type { NewSessionVisibility } from "./create-params.ts";
 
 registerNewSessionSetupEnglish();
@@ -119,7 +118,16 @@ export function NewSessionSelectionStatus(props: { options: NewSessionComposerCa
   );
 }
 
-export function StartControl(props: { options: NewSessionComposerOptions; onSubmit: () => void }) {
+export function StartControl(props: {
+  options: {
+    submitting: boolean;
+    nativeTerminal?: boolean;
+    canSubmit: boolean;
+    submitDisabledReason?: string;
+    attachmentDraft: { reads: { pendingReads: number } };
+  };
+  onSubmit: () => void;
+}) {
   const label = () =>
     props.options.submitting
       ? t("newSession.starting")
