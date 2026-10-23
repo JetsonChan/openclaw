@@ -355,6 +355,16 @@ export function collectRecoveryInventory(params: {
       }
     }
   }
+  if (params.scan?.incomplete) {
+    // A skipped manifest may protect an original already seen in another run.
+    // Diagnostics retain observed bytes, never infer eligibility from a partial graph.
+    for (const item of artifacts) {
+      if (item.outcome === "candidate" || item.outcome === "verification-required") {
+        item.outcome = "protected";
+        item.reason = "incomplete-recovery-inventory";
+      }
+    }
+  }
   protectRecoveryDependencies(artifacts, references);
   return {
     // Doctor still needs absent receipts to reconcile interrupted duplicate retirement.

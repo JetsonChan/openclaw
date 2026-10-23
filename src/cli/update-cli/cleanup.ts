@@ -7,7 +7,7 @@ import {
 } from "../../commands/doctor-session-sqlite-recovery-inventory.js";
 import { retireSessionSqliteRecovery } from "../../commands/doctor-session-sqlite-retirement.js";
 import { selectUnmanifestedRecovery } from "../../commands/update-cleanup-unmanifested.js";
-import { readSourceConfigBestEffort } from "../../config/io.js";
+import { readConfigFileSnapshot, readSourceConfigBestEffort } from "../../config/io.js";
 import { formatDurationHuman } from "../../infra/format-time/format-duration.js";
 import { defaultRuntime, ExitError, writeRuntimeJson } from "../../runtime.js";
 import { updateMaintenanceError } from "./update-maintenance-error.js";
@@ -64,7 +64,21 @@ export async function updateCleanupCommand(options: {
 }): Promise<void> {
   let report: RecoveryCleanupReport | undefined;
   try {
-    const cfg = await readSourceConfigBestEffort();
+    const readConfig = options.includeUnmanifested?.length
+      ? async () => {
+          const snapshot = await readConfigFileSnapshot({
+            observe: false,
+            pluginValidation: "core-only",
+          });
+          if (!snapshot.valid) {
+            throw new Error(
+              "Cannot include unmanifested recovery: configuration and includes must resolve successfully before selection or removal.",
+            );
+          }
+          return snapshot.sourceConfig;
+        }
+      : readSourceConfigBestEffort;
+    const cfg = await readConfig();
     if (options.includeUnmanifested?.length) {
       const inventory = collectUpdateCleanupInventory({ cfg, env: process.env });
       selectUnmanifestedRecovery({
@@ -87,7 +101,7 @@ export async function updateCleanupCommand(options: {
           env: process.env,
           preview: report,
           includeUnmanifested: options.includeUnmanifested,
-          readConfig: readSourceConfigBestEffort,
+          readConfig,
           onProgress: ({ phase, path, index, total, bytes }) => {
             const label = {
               verifying: "Verifying original",

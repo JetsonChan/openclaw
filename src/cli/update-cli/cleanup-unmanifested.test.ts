@@ -408,3 +408,34 @@ it("refuses explicit retirement if stored recovery references cannot be decoded"
   expect(() => preview(f, [f.original])).toThrow();
   expect(fs.readFileSync(f.original, "utf8")).toBe("retained original");
 });
+
+it.each(["selection", "removal"] as const)(
+  "refuses unresolved configuration at explicit %s",
+  async (phase) => {
+    const f = fixture();
+    const include = path.join(f.stateDir, "selection.json");
+    fs.writeFileSync(f.env.OPENCLAW_CONFIG_PATH, JSON.stringify({ $include: "selection.json" }));
+    fs.writeFileSync(
+      include,
+      JSON.stringify(phase === "selection" ? { session: { store: f.original } } : {}),
+    );
+    const hideInclude = () => fs.renameSync(include, `${include}.saved`);
+    if (phase === "selection") {
+      hideInclude();
+    } else {
+      vi.spyOn(process.stderr, "write").mockImplementation((chunk) => {
+        if (String(chunk).startsWith("Retiring explicitly selected original")) {
+          hideInclude();
+        }
+        return true;
+      });
+    }
+    await withEnvAsync(f.env, async () => {
+      await expect(
+        updateCleanupCommand({ yes: true, json: true, includeUnmanifested: [f.original] }),
+      ).rejects.toEqual(new ExitError(1));
+      expect(report().status).toBe("blocked");
+      expect(fs.readFileSync(f.original, "utf8")).toBe("retained original");
+    });
+  },
+);

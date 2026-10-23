@@ -3,11 +3,22 @@ import fs from "node:fs";
 import path from "node:path";
 import { performance } from "node:perf_hooks";
 import { expect, it, vi } from "vitest";
+import { resolveUnsuffixedSqliteTargetFromSessionStorePath } from "../config/sessions/session-sqlite-target-paths.js";
+import { readMigrationArtifactIdentity } from "../infra/session-sqlite-migration-artifact.js";
+import {
+  createSessionSqliteMigrationRun,
+  recordPlannedMigrationMoves,
+  recordCompletedMigrationMoves,
+  updateMigrationManifestTarget,
+  writeSessionSqliteMigrationManifest,
+  type SessionSqliteMigrationMove,
+} from "../infra/session-sqlite-migration-manifest.js";
 import { resolveUpdateCaptureRoot } from "../infra/update-capture-paths.js";
 import { UPDATE_CAPTURE_PRIVACY_MARKER } from "../infra/update-capture-privacy-marker.js";
 import { createUpdateRun, finishUpdateRun } from "../infra/update-run-ledger.js";
 import { withOpenClawTestState } from "../test-utils/openclaw-test-state.js";
 import { runDoctorLintCli } from "./doctor-lint.js";
+import { collectUpdateCleanupInventory } from "./doctor-session-sqlite-recovery-inventory.js";
 import { collectRecoveryDiskUsage, formatRecoveryDiskUsage } from "./recovery-disk-usage.js";
 import { buildStatusCommandOverviewRows } from "./status-overview-rows.js";
 import { createStatusCommandOverviewRowsParams } from "./status.test-support.js";
@@ -135,4 +146,68 @@ it("includes the same read-only recovery inventory in Doctor lint JSON", async (
       stdout.mockRestore();
     }
   });
+});
+
+it("keeps originals protected after incomplete dependency discovery skips another manifest", async () => {
+  await withOpenClawTestState(
+    { label: "recovery-partial-dependencies", applyEnv: true },
+    async (state) => {
+      const storePath = path.join(state.sessionsDir(), "sessions.json");
+      fs.mkdirSync(state.sessionsDir(), { recursive: true });
+      const target = {
+        agentId: "main",
+        storePath,
+        sqlitePath: resolveUnsuffixedSqliteTargetFromSessionStorePath(storePath).path,
+      };
+      const archiveDir = path.join(
+        path.dirname(state.sessionsDir()),
+        "session-sqlite-import-archive",
+      );
+      fs.mkdirSync(archiveDir);
+      const archivePath = path.join(archiveDir, "old.jsonl.imported-1");
+      fs.writeFileSync(archivePath, "original");
+      const move: SessionSqliteMigrationMove = {
+        kind: "transcript",
+        sourcePath: path.join(state.sessionsDir(), "old.jsonl"),
+        archivePath,
+        artifact: {
+          identity: readMigrationArtifactIdentity(archivePath),
+          classification: "imported",
+          reason: "verified-import",
+          dependencies: [],
+          disposal: { state: "retained" },
+        },
+      };
+      const completed = createSessionSqliteMigrationRun(state.env, [target]);
+      recordPlannedMigrationMoves(completed, target, [move]);
+      recordCompletedMigrationMoves(completed, target, [move]);
+      updateMigrationManifestTarget(completed, target, [], { validationBeforeArchive: "passed" });
+      completed.manifest.completedAt = completed.manifest.startedAt;
+      writeSessionSqliteMigrationManifest(completed);
+      using clock = vi.spyOn(performance, "now");
+      clock.mockReturnValue(0);
+      expect(collectUpdateCleanupInventory({ cfg: {}, env: state.env }).report.artifacts).toEqual([
+        expect.objectContaining({ path: archivePath, outcome: "candidate" }),
+      ]);
+      expect(collectRecoveryDiskUsage({ cfg: {}, env: state.env }).total.retirable.count).toBe(1);
+      const unfinished = createSessionSqliteMigrationRun(state.env, [target]);
+      recordPlannedMigrationMoves(unfinished, target, [move]);
+      fs.appendFileSync(unfinished.manifestPath, " ".repeat(3 * 1024 * 1024));
+      expect(
+        collectUpdateCleanupInventory({ cfg: {}, env: state.env }).report.artifacts,
+      ).toContainEqual(expect.objectContaining({ path: archivePath, outcome: "protected" }));
+      const usage = collectRecoveryDiskUsage({ cfg: {}, env: state.env });
+      expect(usage).toMatchObject({
+        incomplete: true,
+        incompleteReasons: expect.arrayContaining(["metadata-byte-limit"]),
+        total: {
+          logicalBytes: 8,
+          count: 1,
+          retirable: { count: 0 },
+          protected: { count: 1, logicalBytes: 8 },
+        },
+      });
+      expect(fs.readFileSync(archivePath, "utf8")).toBe("original");
+    },
+  );
 });
