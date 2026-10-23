@@ -1,5 +1,5 @@
 {
-  "startupJsGzipBytes": 315967,
-  "reason": "Measured cd982fce7e5 startup at 315967 B: +37 B vs c4fd27d76ca (shared UI chunk +13 B with self-profile scopes; hash-only chunks +24 B), no new eager modules; correct the below-measurement baseline from #180890.",
-  "updatedAt": "2026-10-22"
+  "startupJsGzipBytes": 315881,
+  "reason": "Closed dialog deferrals preserve the stricter 315881 B startup baseline; matched current-main builds measure 316334 to 316356 B startup, 1349135 B Chat and 823357 B New Session.",
+  "updatedAt": "2026-10-23"
 }
