@@ -2,8 +2,11 @@
 import { mkdir } from "node:fs/promises";
 import path from "node:path";
 import { expect, it } from "vitest";
+import { evaluateControlUiContext } from "../test-helpers/control-ui-e2e-context.ts";
 import { installMockGateway } from "../test-helpers/control-ui-e2e.ts";
+import { pickerValue } from "../test-helpers/select-picker-e2e.ts";
 import { createControlUiE2eSuite } from "./control-ui-e2e-suite.test-support.ts";
+import { expandProvider } from "./model-providers.test-support.ts";
 
 const suite = createControlUiE2eSuite({
   name: "Control UI Model Provider operator outcomes mocked Gateway E2E",
@@ -13,7 +16,6 @@ const suite = createControlUiE2eSuite({
 });
 const now = Date.now();
 const recordVisuals = process.env.OPENCLAW_UI_E2E_RECORD === "1";
-const artifactDir = path.resolve(".artifacts/control-ui-e2e/model-providers");
 const unavailableMessage =
   "Provider usage is unavailable; the last request failed. Refresh to retry.";
 
@@ -32,13 +34,12 @@ function providerUsageResponses(usageStatus: unknown) {
         },
       ],
     },
-    "sessions.usage": { aggregates: { byProvider: [] } },
     "usage.status": usageStatus,
   };
 }
 
 suite.define(() => {
-  it("shows a visible warning when the provider usage request fails", async () => {
+  it("shows usage request failures with no configured providers", async () => {
     await suite.withPage(
       {
         locale: "en-US",
@@ -53,19 +54,22 @@ suite.define(() => {
         });
 
         await page.goto(`${suite.server.baseUrl}settings/model-providers`);
-        await page.locator('[data-provider-id="openai"]').waitFor();
         await expect
           .poll(async () => (await gateway.getRequests("usage.status")).length)
           .toBeGreaterThan(0);
         await expect
           .poll(() => page.locator(".settings-page").textContent())
           .toContain(unavailableMessage);
+        expect(await page.locator("[data-provider-id]").count()).toBe(0);
         if (recordVisuals) {
-          await mkdir(artifactDir, { recursive: true });
+          await mkdir(path.join(suite.artifactDir, "model-providers"), { recursive: true });
           await page.screenshot({
             animations: "disabled",
             fullPage: true,
-            path: path.join(artifactDir, "provider-usage-request-failed.png"),
+            path: path.join(
+              path.join(suite.artifactDir, "model-providers"),
+              "provider-usage-request-failed.png",
+            ),
           });
         }
       },
@@ -100,15 +104,20 @@ suite.define(() => {
         await expect
           .poll(async () => (await gateway.getRequests("usage.status")).length)
           .toBeGreaterThan(0);
-        await expect.poll(() => card.textContent()).toContain("provider API unavailable");
+        await expect
+          .poll(() => page.locator('.provider-row[data-provider-id="openai"]').textContent())
+          .toContain("provider API unavailable");
         await expect
           .poll(() => page.locator(".settings-page").textContent())
           .not.toContain(unavailableMessage);
         if (recordVisuals) {
-          await mkdir(artifactDir, { recursive: true });
+          await mkdir(path.join(suite.artifactDir, "model-providers"), { recursive: true });
           await card.screenshot({
             animations: "disabled",
-            path: path.join(artifactDir, "provider-usage-provider-error.png"),
+            path: path.join(
+              path.join(suite.artifactDir, "model-providers"),
+              "provider-usage-provider-error.png",
+            ),
           });
         }
       },
@@ -165,50 +174,47 @@ suite.define(() => {
         await expect
           .poll(async () => (await gateway.getRequests("models.list")).length)
           .toBeGreaterThan(0);
+        const catalogWarning = page.locator('.model-providers__catalog-progress[role="alert"]');
 
         if (recordVisuals) {
-          await mkdir(artifactDir, { recursive: true });
-          const phase =
-            (await page.locator(".provider-usage-error").count()) === 0 ? "before" : "after";
+          await mkdir(path.join(suite.artifactDir, "model-providers"), { recursive: true });
+          const phase = (await catalogWarning.count()) === 0 ? "before" : "after";
           await page.screenshot({
             animations: "disabled",
             fullPage: true,
-            path: path.join(artifactDir, `model-catalog-request-failure-${phase}.png`),
+            path: path.join(
+              path.join(suite.artifactDir, "model-providers"),
+              `model-catalog-request-failure-${phase}.png`,
+            ),
           });
         }
 
         await expect
-          .poll(() => page.locator(".provider-usage-error").textContent(), { timeout: 5_000 })
+          .poll(() => catalogWarning.textContent(), { timeout: 5_000 })
           .toContain("Model catalog temporarily unavailable");
+        await catalogWarning.getByRole("button", { name: "Retry", exact: true }).waitFor();
+        expect(await page.locator(".provider-usage__error").count()).toBe(0);
         expect(await page.locator('[data-model-readiness="model-required"]').count()).toBe(0);
-        const primary = page.locator(".model-providers__defaults wa-select").first();
-        await expect
-          .poll(() =>
-            primary.evaluate((element) =>
-              String((element as HTMLElement & { value?: string }).value),
-            ),
-          )
-          .toBe("openai/gpt-5.5");
+        const primary = page.locator(".model-providers__defaults openclaw-select-picker").first();
+        await expect.poll(() => pickerValue(primary)).toBe("openai/gpt-5.5");
 
         await gateway.setMethodResponse("models.list", {
           models: [{ id: "gpt-5.5", name: "GPT-5.5", provider: "openai", available: true }],
         });
         await page.getByRole("button", { name: "Refresh", exact: true }).click();
 
-        await expect.poll(() => page.locator(".provider-usage-error").count()).toBe(0);
+        await expect.poll(() => catalogWarning.count()).toBe(0);
+        await expect.poll(() => page.locator(".provider-usage__error").count()).toBe(0);
         await expect.poll(() => card.textContent()).toContain("API key set in config");
-        await expect
-          .poll(() =>
-            primary.evaluate((element) =>
-              String((element as HTMLElement & { value?: string }).value),
-            ),
-          )
-          .toBe("openai/gpt-5.5");
+        await expect.poll(() => pickerValue(primary)).toBe("openai/gpt-5.5");
         if (recordVisuals) {
           await page.screenshot({
             animations: "disabled",
             fullPage: true,
-            path: path.join(artifactDir, "model-catalog-request-recovered.png"),
+            path: path.join(
+              path.join(suite.artifactDir, "model-providers"),
+              "model-catalog-request-recovered.png",
+            ),
           });
         }
       },
@@ -274,45 +280,61 @@ suite.define(() => {
 
         await page.goto(`${suite.server.baseUrl}settings/model-providers`);
         const openaiCard = page.locator('[data-provider-id="openai"]');
-        await expect.poll(async () => openaiCard.textContent()).toContain("Credentials for Main");
-        await openaiCard.getByRole("button", { name: "Replace key" }).click();
+        // An agent switch reloads the list, so open the row again on each read.
+        const credentials = async () =>
+          (await expandProvider(page, "openai"))
+            .locator(".model-providers__credentials")
+            .textContent();
+        await expect.poll(credentials).toContain("Credentials for Main");
+        await openaiCard.getByRole("button", { name: "Set API key" }).click();
         if (recordVisuals) {
-          await mkdir(artifactDir, { recursive: true });
+          await mkdir(path.join(suite.artifactDir, "model-providers"), { recursive: true });
           await page.screenshot({
-            path: path.join(artifactDir, "provider-credential-scope-before.png"),
+            path: path.join(
+              path.join(suite.artifactDir, "model-providers"),
+              "provider-credential-scope-before.png",
+            ),
             fullPage: true,
           });
         }
         await openaiCard.getByLabel("API key").fill("synthetic-main-provider-key");
 
-        const agentPicker = page.locator(".agent-scope-control openclaw-agent-select");
+        const agentPicker = page.locator(".settings-sidebar__agent openclaw-agent-select");
         await agentPicker.locator(".agent-select__trigger").click();
-        await agentPicker.locator('wa-dropdown-item[aria-label="Writer"]').click();
-        await expect.poll(async () => openaiCard.textContent()).toContain("Credentials for Writer");
+        await agentPicker.getByRole("menuitemradio", { name: "Writer", exact: true }).click();
+        await expect.poll(credentials).toContain("Credentials for Writer");
         await expect.poll(async () => openaiCard.locator('input[type="password"]').count()).toBe(0);
         expect(await gateway.getRequests("config.patch")).toHaveLength(0);
         if (recordVisuals) {
           await page.screenshot({
-            path: path.join(artifactDir, "provider-credential-scope-inline-cleared.png"),
+            path: path.join(
+              path.join(suite.artifactDir, "model-providers"),
+              "provider-credential-scope-inline-cleared.png",
+            ),
             fullPage: true,
           });
         }
 
-        const addSection = page.locator(".settings-section", {
-          has: page.getByRole("heading", { name: "Add provider" }),
-        });
-        await addSection.getByRole("button", { name: "Add provider", exact: true }).click();
-        await addSection.getByLabel("Provider").selectOption("google");
+        await page.locator("[data-models-connect]").click();
+        await page.locator('[data-models-login-provider="google"]').click();
+        await page.locator("[data-models-login-api-key]").click();
+        const addSection = page.locator("[data-models-key-dialog]");
         await addSection.getByLabel("API key").fill("synthetic-writer-provider-key");
-        await agentPicker.locator(".agent-select__trigger").click();
-        await agentPicker.locator('wa-dropdown-item[aria-label="Main"]').click();
-        await expect.poll(async () => openaiCard.textContent()).toContain("Credentials for Main");
-        await expect.poll(async () => page.locator(".model-providers__add-form").count()).toBe(0);
+        // The modal makes the picker inert. Use its selection owner without
+        // closing the dialog so this still proves open-draft scope retirement.
+        await evaluateControlUiContext(page, (context) => {
+          context.settingsAgentSelection.set("main");
+        });
+        await expect.poll(credentials).toContain("Credentials for Main");
+        await expect.poll(async () => page.locator("[data-models-key-dialog]").count()).toBe(0);
         await expect.poll(async () => openaiCard.locator('input[type="password"]').count()).toBe(0);
         expect(await gateway.getRequests("config.patch")).toHaveLength(0);
         if (recordVisuals) {
           await page.screenshot({
-            path: path.join(artifactDir, "provider-credential-scope-after.png"),
+            path: path.join(
+              path.join(suite.artifactDir, "model-providers"),
+              "provider-credential-scope-after.png",
+            ),
             fullPage: true,
           });
         }

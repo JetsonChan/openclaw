@@ -19,7 +19,9 @@ import { createEmptyPluginRegistry } from "../../../../src/plugins/registry-empt
 import { setActivePluginRegistry } from "../../../../src/plugins/runtime.js";
 import { PluginApprovalResolutions } from "../../../../src/plugins/types.js";
 
-type BrokerEvent = Parameters<Parameters<EmbeddedPluginApprovalBroker["subscribe"]>[0]>[0];
+type BrokerEvent = Parameters<
+  NonNullable<ConstructorParameters<typeof EmbeddedPluginApprovalBroker>[0]>
+>[0];
 
 const AGENT_ID = "qa-agent";
 const SESSION_KEY = "agent:qa-agent:approval";
@@ -42,10 +44,9 @@ describe("agent tool safety approvals", () => {
     resetDiagnosticEventsForTest();
     resetGlobalHookRunner();
     setEmbeddedMode(true);
-    broker = new EmbeddedPluginApprovalBroker();
     brokerEvents = [];
+    broker = new EmbeddedPluginApprovalBroker((event) => brokerEvents.push(event));
     resolutions = [];
-    broker.subscribe((event) => brokerEvents.push(event));
     setEmbeddedPluginApprovalBroker(broker);
 
     const registry = createEmptyPluginRegistry();
@@ -146,7 +147,12 @@ describe("agent tool safety approvals", () => {
 
       expect(denied).toMatchObject({
         name: "BeforeToolCallFailureError",
-        message: "Denied by user",
+        message: [
+          "Denied by user. The tool call did not run.",
+          "This denial is final: the approval request is closed. Do not mention /approve or any other approval command to the user.",
+          "Do not run the tool call again or ask the user to approve it again.",
+          "If the user still wants the action, explain that a new tool call will trigger a fresh approval request.",
+        ].join("\n"),
       });
       expect(getBeforeToolCallFailureDisposition(denied)).toBe("blocked");
       expect(execute).not.toHaveBeenCalled();

@@ -1,129 +1,175 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import type { ChatAbortControllerEntry } from "./chat-abort.js";
-
-const sessionRow = vi.hoisted(() => ({
-  key: "agent:main:main",
-  kind: "direct",
-  sessionId: "sess-main",
-  status: "done",
-  updatedAt: 1,
-  thinkingLevel: "ultra" as string | undefined,
-  thinkingLevels: [{ id: "ultra", label: "ultra" }],
-  thinkingOptions: ["ultra"],
-  thinkingDefault: "medium",
-  agentRuntime: { id: "openclaw", source: "model" },
-}));
-const resolveEmbeddedAgentRunProgressStateMock = vi.hoisted(() => vi.fn());
-const loadGatewaySessionRowMock = vi.hoisted(() => vi.fn());
-const projectChatDisplayMessageMock = vi.hoisted(() => vi.fn((message: unknown) => message));
-const listAccessorSessionEntriesReadOnlyMock = vi.hoisted(() => vi.fn());
-const loadAccessorSessionEntryReadOnlyMock = vi.hoisted(() => vi.fn());
-const loadGatewaySessionEntryReadOnlyMock = vi.hoisted(() => vi.fn());
-const readSessionMessageCountAsyncMock = vi.hoisted(() => vi.fn());
-const resolveTranscriptSessionKeyBySessionIdMock = vi.hoisted(() => vi.fn());
-const runtimeConfigState = vi.hoisted(() => ({ value: {} as Record<string, unknown> }));
-
-vi.mock("../config/io.js", () => ({ getRuntimeConfig: () => runtimeConfigState.value }));
-vi.mock("../config/sessions/session-accessor.js", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("../config/sessions/session-accessor.js")>();
-  return {
-    ...actual,
-    listSessionEntriesReadOnly: listAccessorSessionEntriesReadOnlyMock,
-    loadSessionEntryReadOnly: loadAccessorSessionEntryReadOnlyMock,
-    resolveTranscriptSessionKeyBySessionId: resolveTranscriptSessionKeyBySessionIdMock,
-  };
-});
-vi.mock("./chat-display-projection.js", () => ({
-  projectChatDisplayMessage: projectChatDisplayMessageMock,
-}));
-vi.mock("./session-utils.js", () => ({
-  attachOpenClawTranscriptMeta: (message: unknown) => message,
-  loadGatewaySessionRow: loadGatewaySessionRowMock,
-  loadSessionEntry: () => ({ entry: undefined, storePath: "" }),
-  loadGatewaySessionEntryReadOnly: loadGatewaySessionEntryReadOnlyMock,
-}));
-vi.mock("./session-transcript-readers.js", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("./session-transcript-readers.js")>();
-  return {
-    ...actual,
-    readSessionMessageCountAsync: readSessionMessageCountAsyncMock,
-  };
-});
-vi.mock("../agents/embedded-agent-runner/runs.js", async () => {
-  const actual = await vi.importActual<typeof import("../agents/embedded-agent-runner/runs.js")>(
-    "../agents/embedded-agent-runner/runs.js",
-  );
-  return {
-    ...actual,
-    resolveEmbeddedAgentRunProgressState: (...args: unknown[]) =>
-      resolveEmbeddedAgentRunProgressStateMock(...args),
-  };
-});
-
-const { createLifecycleEventBroadcastHandler, createTranscriptUpdateBroadcastHandler } =
-  await import("./server-session-events.js");
-const { createGatewayBroadcaster } = await import("./server-broadcast.js");
-const { subscribePluginSessionsChanged } = await import("../plugins/gateway-events.js");
-
-function createActiveRun(
-  projectSessionActive: boolean,
-  executionStarted = true,
-): ChatAbortControllerEntry {
-  return {
-    controller: new AbortController(),
-    sessionId: "sess-main",
-    sessionKey: "agent:main:main",
-    startedAtMs: Date.now(),
-    executionStarted,
-    expiresAtMs: Date.now() + 60_000,
-    projectSessionActive,
-  };
-}
-
-function createHandler(projectSessionActive: boolean, executionStarted = true) {
-  const broadcastToConnIds = vi.fn();
-  const handler = createTranscriptUpdateBroadcastHandler({
-    broadcastToConnIds,
-    sessionEventSubscribers: { getAll: () => new Set(["conn-1"]) },
-    sessionMessageSubscribers: { get: () => new Set<string>() },
-    chatAbortControllers: new Map([
-      ["run-before-finalize", createActiveRun(projectSessionActive, executionStarted)],
-    ]),
-  });
-  return { broadcastToConnIds, handler };
-}
-
-async function emitAssistantTranscriptUpdate(
-  projectSessionActive: boolean,
-  message: unknown = { role: "assistant", content: [{ type: "text", text: "Final answer" }] },
-  executionStarted = true,
-) {
-  const { broadcastToConnIds, handler } = createHandler(projectSessionActive, executionStarted);
-  await handler({
-    sessionFile: "/tmp/sess-main.jsonl",
-    sessionKey: "agent:main:main",
-    message,
-    messageId: "message-1",
-    messageSeq: 1,
-  });
-  expect(broadcastToConnIds).toHaveBeenCalledTimes(1);
-  return broadcastToConnIds.mock.calls[0]?.[1];
-}
+import { createDeferred, withinTest } from "../../test/helpers/promise.js";
+import { registerTranscriptMarkerQueueTests } from "./server-session-events.marker-queue.test-support.js";
+import {
+  createGatewayBroadcaster,
+  createHandler,
+  createTranscriptUpdateBroadcastHandler,
+  emitAssistantTranscriptUpdate,
+  expectAbsentFields,
+  expectBroadcast,
+  expectPrivateSessionInvalidation,
+  fixedStoreRuntimeConfig,
+  listAccessorSessionEntriesReadOnlyMock,
+  loadAccessorSessionEntryReadOnlyMock,
+  loadGatewaySessionEntryReadOnlyMock,
+  loadGatewaySessionRowMock,
+  ownerGoal,
+  projectChatDisplayMessageMock,
+  readSessionMessageByIdAsyncMock,
+  readSessionMessageCountAsyncMock,
+  resetSessionEventMocks,
+  runtimeConfigState,
+  sessionRow,
+  storedMessage,
+  subscribePluginSessionsChanged,
+  transcriptTarget,
+} from "./server-session-events.test-support.js";
+import { GatewayClientRegistry } from "./server/client-registry.js";
 
 describe("createTranscriptUpdateBroadcastHandler", () => {
   beforeEach(() => {
-    vi.clearAllMocks();
-    resolveEmbeddedAgentRunProgressStateMock.mockReturnValue(undefined);
-    listAccessorSessionEntriesReadOnlyMock.mockReturnValue([]);
-    loadAccessorSessionEntryReadOnlyMock.mockReturnValue(undefined);
-    loadGatewaySessionEntryReadOnlyMock.mockReturnValue({ entry: undefined, storePath: "" });
-    loadGatewaySessionRowMock.mockReturnValue(sessionRow);
-    readSessionMessageCountAsyncMock.mockResolvedValue(undefined);
-    resolveTranscriptSessionKeyBySessionIdMock.mockReturnValue(undefined);
-    loadGatewaySessionRowMock.mockReturnValue(sessionRow);
-    runtimeConfigState.value = {};
-    sessionRow.key = "agent:main:main";
+    resetSessionEventMocks();
+    readSessionMessageByIdAsyncMock.mockImplementation(async (_scope, id: string) =>
+      storedMessage(id),
+    );
     sessionRow.thinkingLevel = "ultra";
+  });
+
+  it("bounds queued presentation behind a held canonical read and invalidates history", async ({
+    signal,
+  }) => {
+    const entered = createDeferred();
+    const release = createDeferred();
+    readSessionMessageByIdAsyncMock.mockImplementationOnce(async () => {
+      entered.resolve();
+      await release.promise;
+      return storedMessage("executing");
+    });
+    loadAccessorSessionEntryReadOnlyMock.mockReturnValue({
+      sessionId: "sess-main",
+      lifecycleRevision: "current",
+      updatedAt: 1,
+    });
+    const { broadcastToConnIds, handler } = createHandler(false, true, () => new Set(["targeted"]));
+    const update = (messageId: string) => ({
+      target: transcriptTarget("/tmp/saturated.sqlite"),
+      lifecycleRevision: "current",
+      messageId,
+      message: { role: "user", content: messageId },
+    });
+    const executing = handler(update("executing"));
+    await withinTest(entered.promise, signal);
+    const pending = Array.from({ length: 1000 }, (_, index) => handler(update(String(index))));
+    let settled = false;
+    void pending[0]!.then(() => {
+      settled = true;
+    });
+    try {
+      // Admission shares a pending publication, not a promise chain per notification.
+      expect(new Set(pending).size).toBe(1);
+      expect(settled).toBe(false);
+      const independent = handler({
+        sessionKey: "agent:main:independent",
+        messageId: "independent",
+        messageSeq: 1,
+        message: { role: "user", content: "independent" },
+      });
+      await withinTest(independent, signal);
+      expect(broadcastToConnIds).toHaveBeenCalledTimes(1);
+      release.resolve();
+      const [executed, ...collapsed] = await withinTest(
+        Promise.all([executing, ...pending]),
+        signal,
+      );
+      expect(executed).toBeUndefined();
+      expect(collapsed.every((result) => result === false)).toBe(true);
+      expect(readSessionMessageByIdAsyncMock).toHaveBeenCalledOnce();
+      expect(broadcastToConnIds.mock.calls.map(([event]) => event)).toEqual([
+        "session.message",
+        "session.message",
+        "sessions.changed",
+      ]);
+      expect(broadcastToConnIds.mock.calls[2]?.[2]).toEqual(new Set(["conn-1", "targeted"]));
+      expect(broadcastToConnIds.mock.calls[2]?.[1]).not.toHaveProperty("messageId");
+    } finally {
+      release.resolve();
+      await Promise.allSettled([executing, ...pending]);
+    }
+  });
+
+  it("keeps saturated resets separate across same-id lifecycle replacement", async ({ signal }) => {
+    const entered = createDeferred();
+    const release = createDeferred();
+    let lifecycleRevision = "before";
+    loadAccessorSessionEntryReadOnlyMock.mockImplementation(() => ({
+      sessionId: "sess-main",
+      lifecycleRevision,
+      updatedAt: 1,
+    }));
+    readSessionMessageByIdAsyncMock.mockImplementationOnce(async () => {
+      entered.resolve();
+      await release.promise;
+      return storedMessage("executing");
+    });
+    const { handler, broadcastToConnIds } = createHandler(false);
+    const update = (messageId: string) => ({
+      target: transcriptTarget("/tmp/replaced.sqlite"),
+      lifecycleRevision,
+      messageId,
+      message: { role: "user", content: messageId },
+    });
+    const executing = handler(update("executing"));
+    await withinTest(entered.promise, signal);
+    const before = handler(update("before-1"));
+    expect(handler(update("before-2"))).toBe(before);
+    lifecycleRevision = "after";
+    const after = handler(update("after-1"));
+    expect(handler(update("after-2"))).toBe(after);
+    expect(after).not.toBe(before);
+    try {
+      release.resolve();
+      await withinTest(Promise.all([executing, before, after]), signal);
+      expect(readSessionMessageByIdAsyncMock).toHaveBeenCalledOnce();
+      expect(broadcastToConnIds).toHaveBeenCalledExactlyOnceWith(
+        "sessions.changed",
+        expect.objectContaining({ sessionKey: "agent:main:main", phase: "message" }),
+        expect.any(Set),
+        expect.objectContaining({ prepareSessionProjection: expect.any(Function) }),
+      );
+    } finally {
+      release.resolve();
+      await Promise.allSettled([executing, before, after]);
+    }
+  });
+
+  it("reads canonical content and placement from one selected snapshot", async () => {
+    const transcriptPosition = { source: "replacement-generation", rawSeq: 10 };
+    readSessionMessageByIdAsyncMock.mockResolvedValueOnce({
+      found: true,
+      oversized: false,
+      seq: 7,
+      message: {
+        role: "assistant",
+        content: "replacement",
+        __openclaw: { id: "same-id", transcriptPosition },
+      },
+    });
+    const { broadcastToConnIds, handler } = createHandler(false);
+    await handler({
+      target: transcriptTarget("/tmp/canonical-update.sqlite"),
+      messageId: "same-id",
+      messageSeq: 1,
+      message: { role: "assistant", content: "stale queued content" },
+    });
+    expectBroadcast(broadcastToConnIds, {
+      messageId: "same-id",
+      messageSeq: 7,
+      message: expect.objectContaining({
+        content: "replacement",
+        __openclaw: expect.objectContaining({ transcriptPosition }),
+      }),
+    });
   });
 
   it("never silently drops an authoritative session message for a slow subscriber", async () => {
@@ -138,15 +184,11 @@ describe("createTranscriptUpdateBroadcastHandler", () => {
     });
 
     expect(broadcastToConnIds).toHaveBeenCalledTimes(1);
-    expect(broadcastToConnIds).toHaveBeenCalledWith(
-      "session.message",
-      expect.objectContaining({
-        sessionKey: "agent:main:main",
-        messageId: "durable-user-1",
-        messageSeq: 1,
-      }),
-      expect.any(Set),
-    );
+    expectBroadcast(broadcastToConnIds, {
+      sessionKey: "agent:main:main",
+      messageId: "durable-user-1",
+      messageSeq: 1,
+    });
   });
 
   it("invalidates broad and targeted subscribers once for an identity-only commit", async () => {
@@ -165,16 +207,10 @@ describe("createTranscriptUpdateBroadcastHandler", () => {
       broadcastToConnIds,
       sessionEventSubscribers: { getAll: () => broadConnIds },
       sessionMessageSubscribers: { get: getSessionMessageSubscribers },
-      chatAbortControllers: new Map(),
     });
 
     await handler({
-      target: {
-        agentId: "main",
-        sessionId: "sess-main",
-        sessionKey: "agent:main:main",
-        storePath: "/tmp/identity-only-custom-sessions.json",
-      },
+      target: transcriptTarget("/tmp/identity-only-custom-sessions.json"),
       lifecycleRevision: "committed-revision",
     });
 
@@ -185,36 +221,57 @@ describe("createTranscriptUpdateBroadcastHandler", () => {
       sessionKey: "agent:main:main",
       storePath: "/tmp/identity-only-custom-sessions.json",
     });
-    expect(broadcastToConnIds).toHaveBeenCalledWith(
-      "sessions.changed",
-      expect.objectContaining({
+    expectBroadcast(
+      broadcastToConnIds,
+      {
         sessionKey: "agent:main:main",
         agentId: "main",
         sessionId: "sess-main",
         phase: "message",
-      }),
+      },
+      "sessions.changed",
       new Set(["conn-broad", "conn-shared", "conn-targeted"]),
     );
     const payload = broadcastToConnIds.mock.calls[0]?.[1];
-    expect(payload).not.toHaveProperty("message");
-    expect(payload).not.toHaveProperty("messageId");
-    expect(payload).not.toHaveProperty("messageSeq");
-    expect(payload).not.toHaveProperty("lifecycleRevision");
-    expect(payload).not.toHaveProperty("storePath");
-    expect(payload).not.toHaveProperty("target.storePath");
+    expectAbsentFields(
+      payload,
+      "message messageId messageSeq lifecycleRevision storePath target.storePath",
+    );
     expect(readSessionMessageCountAsyncMock).not.toHaveBeenCalled();
+  });
+
+  it("scopes a queued marker update to its final transcript key", async () => {
+    listAccessorSessionEntriesReadOnlyMock
+      .mockReturnValueOnce([{ key: "agent:main:queued", entry: { sessionId: "sess-main" } }])
+      .mockReturnValue([{ key: "agent:main:current", entry: { sessionId: "sess-main" } }]);
+    const getSessionMessageSubscribers = vi.fn((sessionKey: string) =>
+      sessionKey === "agent:main:current" ? new Set(["conn-current"]) : new Set(["conn-stale"]),
+    );
+    const { broadcastToConnIds, handler } = createHandler(
+      false,
+      true,
+      getSessionMessageSubscribers,
+    );
+
+    await handler({
+      sessionFile: "sqlite:main:sess-main:/tmp/explicit-sessions.json",
+    });
+
+    expect(getSessionMessageSubscribers).toHaveBeenCalledWith("agent:main:current");
+    expect(getSessionMessageSubscribers).not.toHaveBeenCalledWith("agent:main:queued");
+    expectBroadcast(
+      broadcastToConnIds,
+      { sessionKey: "agent:main:current" },
+      "sessions.changed",
+      new Set(["conn-1", "conn-current"]),
+    );
   });
 
   it("rejects an identity-only invalidation when its custom-store owner was deleted", async () => {
     const { broadcastToConnIds, handler } = createHandler(false);
 
     await handler({
-      target: {
-        agentId: "main",
-        sessionId: "sess-main",
-        sessionKey: "agent:main:main",
-        storePath: "/tmp/deleted-identity-only-sessions.json",
-      },
+      target: transcriptTarget("/tmp/deleted-identity-only-sessions.json"),
       lifecycleRevision: "deleted-revision",
     });
 
@@ -223,46 +280,16 @@ describe("createTranscriptUpdateBroadcastHandler", () => {
     expect(readSessionMessageCountAsyncMock).not.toHaveBeenCalled();
   });
 
+  registerTranscriptMarkerQueueTests();
+
   it.each([
-    {
-      updateSource: "committed",
-      ownerChange: "revised",
-      lifecycleRevision: "revision-before-reset",
-      expectedEntryReads: 2,
-    },
-    {
-      updateSource: "legacy",
-      ownerChange: "revised",
-      lifecycleRevision: undefined,
-      expectedEntryReads: 3,
-    },
-    {
-      updateSource: "committed",
-      ownerChange: "deleted",
-      lifecycleRevision: "revision-before-reset",
-      expectedEntryReads: 2,
-    },
-    {
-      updateSource: "legacy",
-      ownerChange: "deleted",
-      lifecycleRevision: undefined,
-      expectedEntryReads: 3,
-    },
-    {
-      updateSource: "committed",
-      ownerChange: "rebound",
-      lifecycleRevision: "revision-before-reset",
-      expectedEntryReads: 2,
-    },
-    {
-      updateSource: "legacy",
-      ownerChange: "rebound",
-      lifecycleRevision: undefined,
-      expectedEntryReads: 3,
-    },
-  ])(
-    "discards a queued $updateSource message when its session owner is $ownerChange",
-    async ({ lifecycleRevision, expectedEntryReads, ownerChange }) => {
+    ["committed", "revised", "revision-before-reset"],
+    ["legacy", "revised", undefined],
+    ["committed", "deleted", "revision-before-reset"],
+    ["committed", "rebound", "revision-before-reset"],
+  ] as const)(
+    "discards a queued %s message when its session owner is %s",
+    async (_source, ownerChange, lifecycleRevision) => {
       let currentEntry:
         | { sessionId: string; lifecycleRevision: string; updatedAt: number }
         | undefined = {
@@ -279,28 +306,23 @@ describe("createTranscriptUpdateBroadcastHandler", () => {
         },
         storePath: "/tmp/default-lifecycle-sessions.json",
       });
-      let resolveMessageCount: ((value: number) => void) | undefined;
-      readSessionMessageCountAsyncMock.mockImplementation(
+      let resolveMessageRead: ((value: ReturnType<typeof storedMessage>) => void) | undefined;
+      readSessionMessageByIdAsyncMock.mockImplementation(
         () =>
-          new Promise<number>((resolve) => {
-            resolveMessageCount = resolve;
+          new Promise<ReturnType<typeof storedMessage>>((resolve) => {
+            resolveMessageRead = resolve;
           }),
       );
       const { broadcastToConnIds, handler } = createHandler(false);
 
       const pendingBroadcast = handler({
-        target: {
-          agentId: "main",
-          sessionId: "sess-main",
-          sessionKey: "agent:main:main",
-          storePath: "/tmp/reset-lifecycle-sessions.json",
-        },
+        target: transcriptTarget("/tmp/reset-lifecycle-sessions.json"),
         ...(lifecycleRevision ? { lifecycleRevision } : {}),
         message: { role: "user", content: [{ type: "text", text: "deleted by reset" }] },
         messageId: "message-before-reset",
       });
 
-      await vi.waitFor(() => expect(readSessionMessageCountAsyncMock).toHaveBeenCalledOnce());
+      await vi.waitFor(() => expect(readSessionMessageByIdAsyncMock).toHaveBeenCalledOnce());
       if (ownerChange === "deleted") {
         currentEntry = undefined;
       } else if (ownerChange === "rebound") {
@@ -308,124 +330,70 @@ describe("createTranscriptUpdateBroadcastHandler", () => {
       } else {
         currentEntry.lifecycleRevision = "revision-after-reset";
       }
-      resolveMessageCount?.(1);
+      resolveMessageRead?.(storedMessage("message-before-reset"));
 
       await pendingBroadcast;
-      expect(loadAccessorSessionEntryReadOnlyMock).toHaveBeenCalledTimes(expectedEntryReads);
       expect(loadGatewaySessionEntryReadOnlyMock).not.toHaveBeenCalled();
       expect(broadcastToConnIds).not.toHaveBeenCalled();
     },
   );
 
-  it("validates a committed custom-store owner without exposing private identity", async () => {
-    loadAccessorSessionEntryReadOnlyMock.mockReturnValue({
-      sessionId: "sess-main",
-      lifecycleRevision: "current-revision",
-      updatedAt: 1,
-    });
-    loadGatewaySessionEntryReadOnlyMock.mockReturnValue({
-      entry: {
-        sessionId: "sess-main",
-        lifecycleRevision: "unrelated-default-revision",
-        updatedAt: 1,
-      },
-      storePath: "/tmp/default-lifecycle-sessions.json",
-    });
-    const { broadcastToConnIds, handler } = createHandler(false);
-
-    await handler({
-      target: {
-        agentId: "main",
-        sessionId: "sess-main",
-        sessionKey: "agent:main:main",
-        storePath: "/tmp/current-lifecycle-sessions.json",
-      },
-      lifecycleRevision: "current-revision",
-      message: { role: "user", content: [{ type: "text", text: "current prompt" }] },
-      messageId: "message-current-lifecycle",
-      messageSeq: 1,
-    });
-
-    expect(broadcastToConnIds).toHaveBeenCalledOnce();
-    expect(loadAccessorSessionEntryReadOnlyMock).toHaveBeenCalledWith({
-      agentId: "main",
-      sessionKey: "agent:main:main",
-      storePath: "/tmp/current-lifecycle-sessions.json",
-    });
-    expect(loadGatewaySessionEntryReadOnlyMock).not.toHaveBeenCalled();
-    expect(broadcastToConnIds).toHaveBeenCalledWith(
-      "session.message",
-      expect.objectContaining({
-        sessionKey: "agent:main:main",
-        messageId: "message-current-lifecycle",
-        messageSeq: 1,
-      }),
-      expect.any(Set),
-    );
-    const payload = broadcastToConnIds.mock.calls[0]?.[1];
-    expect(payload).not.toHaveProperty("lifecycleRevision");
-    expect(payload).not.toHaveProperty("storePath");
-    expect(payload).not.toHaveProperty("target.storePath");
-  });
-
-  it("keeps committed messages visible when the current owner has no legacy revision", async () => {
-    loadAccessorSessionEntryReadOnlyMock.mockReturnValue({
-      sessionId: "sess-main",
-      updatedAt: 1,
-    });
-    const { broadcastToConnIds, handler } = createHandler(false);
-
-    await handler({
-      target: {
-        agentId: "main",
-        sessionId: "sess-main",
-        sessionKey: "agent:main:main",
-        storePath: "/tmp/revisionless-owner-sessions.json",
-      },
-      lifecycleRevision: "committed-revision",
-      message: { role: "user", content: [{ type: "text", text: "revisionless owner" }] },
-      messageId: "revisionless-owner-message",
-      messageSeq: 1,
-    });
-
-    expect(broadcastToConnIds).toHaveBeenCalledOnce();
-    expect(broadcastToConnIds).toHaveBeenCalledWith(
-      "session.message",
-      expect.objectContaining({
-        sessionKey: "agent:main:main",
-        messageId: "revisionless-owner-message",
-        messageSeq: 1,
-      }),
-      expect.any(Set),
-    );
-  });
-
-  it("preserves revisionless transcript updates when ownership is unavailable", async () => {
-    readSessionMessageCountAsyncMock.mockResolvedValue(3);
-    const { broadcastToConnIds, handler } = createHandler(false);
-
-    await handler({
-      target: {
-        agentId: "main",
-        sessionId: "sess-main",
-        sessionKey: "agent:main:main",
-        storePath: "/tmp/legacy-lifecycle-sessions.json",
-      },
-      message: { role: "user", content: [{ type: "text", text: "legacy prompt" }] },
-      messageId: "legacy-lifecycle-message",
-    });
-
-    expect(broadcastToConnIds).toHaveBeenCalledOnce();
-    expect(broadcastToConnIds).toHaveBeenCalledWith(
-      "session.message",
-      expect.objectContaining({
-        sessionKey: "agent:main:main",
-        messageId: "legacy-lifecycle-message",
-        messageSeq: 3,
-      }),
-      expect.any(Set),
-    );
-  });
+  it.each([
+    ["current-lifecycle", "current-revision", "message-current-lifecycle", "current prompt"],
+    [
+      "revisionless-owner",
+      "committed-revision",
+      "revisionless-owner-message",
+      "revisionless owner",
+    ],
+    ["legacy-lifecycle", undefined, "legacy-lifecycle-message", "legacy prompt"],
+  ] as const)(
+    "publishes the %s custom-store message without private identity",
+    async (kind, lifecycleRevision, messageId, text) => {
+      const current = kind === "current-lifecycle";
+      const messageSeq = lifecycleRevision ? 1 : 3;
+      const storePath = `/tmp/${kind}-sessions.json`;
+      if (lifecycleRevision) {
+        loadAccessorSessionEntryReadOnlyMock.mockReturnValue({
+          sessionId: "sess-main",
+          updatedAt: 1,
+          ...(current ? { lifecycleRevision } : {}),
+        });
+      }
+      if (current) {
+        loadGatewaySessionEntryReadOnlyMock.mockReturnValue({
+          entry: {
+            sessionId: "sess-main",
+            lifecycleRevision: "unrelated-default-revision",
+            updatedAt: 1,
+          },
+          storePath: "/tmp/default-lifecycle-sessions.json",
+        });
+      }
+      readSessionMessageByIdAsyncMock.mockResolvedValueOnce(storedMessage(messageId, messageSeq));
+      const { broadcastToConnIds, handler } = createHandler(false);
+      await handler({
+        target: transcriptTarget(storePath),
+        ...(lifecycleRevision ? { lifecycleRevision, messageSeq } : {}),
+        message: { role: "user", content: [{ type: "text", text }] },
+        messageId,
+      });
+      expect(broadcastToConnIds).toHaveBeenCalledOnce();
+      expectBroadcast(broadcastToConnIds, { sessionKey: "agent:main:main", messageId, messageSeq });
+      if (current) {
+        expect(loadAccessorSessionEntryReadOnlyMock).toHaveBeenCalledWith({
+          agentId: "main",
+          sessionKey: "agent:main:main",
+          storePath,
+        });
+        expect(loadGatewaySessionEntryReadOnlyMock).not.toHaveBeenCalled();
+        expectAbsentFields(
+          broadcastToConnIds.mock.calls[0]?.[1],
+          "lifecycleRevision storePath target.storePath",
+        );
+      }
+    },
+  );
 
   it("carries terminal assistant run ownership while plugin finalization keeps the run active", async () => {
     // before_agent_finalize hooks run after the assistant transcript write but
@@ -442,31 +410,27 @@ describe("createTranscriptUpdateBroadcastHandler", () => {
       messageSeq: 1,
     });
 
-    expect(broadcastToConnIds).toHaveBeenCalledWith(
-      "session.message",
-      expect.objectContaining({
-        sessionKey: "agent:main:main",
-        runId: "run-before-finalize",
-        messageId: "message-1",
-        messageSeq: 1,
+    expectBroadcast(broadcastToConnIds, {
+      sessionKey: "agent:main:main",
+      runId: "run-before-finalize",
+      messageId: "message-1",
+      messageSeq: 1,
+      status: "running",
+      hasActiveRun: true,
+      session: expect.objectContaining({
+        key: "agent:main:main",
         status: "running",
         hasActiveRun: true,
-        session: expect.objectContaining({
-          key: "agent:main:main",
-          status: "running",
-          hasActiveRun: true,
-        }),
       }),
-      expect.any(Set),
-    );
+    });
   });
 
-  it("projects queued status into transcript snapshots before execution starts", async () => {
+  it("does not project a prepared source as a running startup transcript", async () => {
     await expect(emitAssistantTranscriptUpdate(true, undefined, false)).resolves.toMatchObject({
       sessionKey: "agent:main:main",
-      status: "queued",
-      hasActiveRun: true,
-      session: { key: "agent:main:main", status: "queued", hasActiveRun: true },
+      status: "done",
+      hasActiveRun: false,
+      session: { key: "agent:main:main", status: "done", hasActiveRun: false },
     });
   });
 
@@ -474,64 +438,38 @@ describe("createTranscriptUpdateBroadcastHandler", () => {
     const payload = await emitAssistantTranscriptUpdate(false);
 
     expect(payload).toMatchObject({
+      sessionKey: "agent:main:main",
+      hasActiveRun: false,
       session: {
+        hasActiveRun: false,
         thinkingLevel: "ultra",
         agentRuntime: { id: "openclaw" },
       },
     });
-    expect(payload).not.toHaveProperty("thinkingLevels");
-    expect(payload).not.toHaveProperty("thinkingOptions");
-    expect(payload).not.toHaveProperty("thinkingDefault");
-    expect(payload).not.toHaveProperty("session.thinkingLevels");
-    expect(payload).not.toHaveProperty("session.thinkingOptions");
-    expect(payload).not.toHaveProperty("session.thinkingDefault");
+    expectAbsentFields(
+      payload,
+      "thinkingLevels thinkingOptions thinkingDefault session.thinkingLevels session.thinkingOptions session.thinkingDefault",
+    );
   });
 
-  it("emits an explicit null when the thinking override is cleared", async () => {
+  it("emits explicit tombstones in transcript snapshots", async () => {
     sessionRow.thinkingLevel = undefined;
 
     await expect(emitAssistantTranscriptUpdate(false)).resolves.toMatchObject({
-      session: { thinkingLevel: null },
+      agentStatus: null,
+      observerDigest: null,
+      session: { thinkingLevel: null, agentStatus: null, observerDigest: null },
     });
   });
 
-  it("keeps stale-run recovery when terminal lifecycle has cleared active projection", async () => {
-    await expect(emitAssistantTranscriptUpdate(false)).resolves.toMatchObject({
-      sessionKey: "agent:main:main",
-      hasActiveRun: false,
-      session: { hasActiveRun: false },
-    });
-  });
-
-  it("keeps transcript snapshots active for embedded or channel reply runs", async () => {
-    resolveEmbeddedAgentRunProgressStateMock.mockImplementation((sessionId) =>
-      sessionId === "sess-main" ? "running" : undefined,
-    );
-
-    await expect(emitAssistantTranscriptUpdate(false)).resolves.toMatchObject({
-      sessionKey: "agent:main:main",
-      hasActiveRun: true,
-      activeRunIds: null,
-      session: {
-        key: "agent:main:main",
-        sessionId: "sess-main",
-        hasActiveRun: true,
-        activeRunIds: null,
-      },
-    });
-    expect(resolveEmbeddedAgentRunProgressStateMock).toHaveBeenCalledWith("sess-main");
-  });
-
-  it("routes an ownerless bare transcript event through the persisted fixed-store owner", async () => {
-    runtimeConfigState.value = {
-      session: { store: "/tmp/owned-shared.sqlite" },
-      agents: {
-        ownership: "explicit",
-        defaults: { sessionStore: { agentId: "ops" } },
-        entries: { ops: {}, research: {} },
-      },
-    };
+  it.each([
+    { name: "routes the configured persisted owner without publishing its goal" },
+    { name: "publishes the explicit owner's identity and goal", agentId: "ops" },
+  ])("$name", async ({ agentId }) => {
+    runtimeConfigState.value = fixedStoreRuntimeConfig("ops", ["ops", "research"]);
     sessionRow.key = "global";
+    const goal = { ...ownerGoal };
+    loadGatewaySessionRowMock.mockReturnValue({ ...sessionRow, goal });
     const getSessionMessageSubscribers = vi.fn((sessionKey: string) =>
       sessionKey === "global"
         ? new Set(["conn-global"])
@@ -544,11 +482,11 @@ describe("createTranscriptUpdateBroadcastHandler", () => {
       broadcastToConnIds,
       sessionEventSubscribers: { getAll: () => new Set<string>() },
       sessionMessageSubscribers: { get: getSessionMessageSubscribers },
-      chatAbortControllers: new Map(),
     });
 
     await handler({
       sessionKey: "global",
+      ...(agentId ? { agentId } : {}),
       message: { role: "assistant", content: [{ type: "text", text: "Owner reply" }] },
       messageId: "message-global-owner",
       messageSeq: 1,
@@ -558,13 +496,59 @@ describe("createTranscriptUpdateBroadcastHandler", () => {
     expect(getSessionMessageSubscribers).toHaveBeenCalledWith("global");
     expect(loadGatewaySessionRowMock).toHaveBeenCalledWith("global", {
       agentId: "ops",
-      transcriptUsageMaxBytes: 64 * 1024,
     });
-    expect(broadcastToConnIds).toHaveBeenCalledWith(
+    expectBroadcast(
+      broadcastToConnIds,
+      { sessionKey: "global" },
       "session.message",
-      expect.objectContaining({ sessionKey: "global" }),
       new Set(["conn-scoped", "conn-global"]),
     );
+    const payload = broadcastToConnIds.mock.calls[0]?.[1];
+    if (agentId) {
+      expect(payload).toMatchObject({ agentId: "ops", goal, session: { goal } });
+    } else {
+      expectAbsentFields(payload, "agentId goal session.goal");
+    }
+  });
+
+  it("keeps a retired fixed-store owner private instead of routing through another agent", async () => {
+    runtimeConfigState.value = fixedStoreRuntimeConfig("ops", ["research"]);
+    const getSessionMessageSubscribers = vi.fn((sessionKey: string) =>
+      sessionKey === "agent:ops:global"
+        ? new Set(["conn-ops"])
+        : sessionKey === "agent:research:global"
+          ? new Set(["conn-research"])
+          : new Set<string>(),
+    );
+    const { broadcastToConnIds, handler } = createHandler(
+      false,
+      true,
+      getSessionMessageSubscribers,
+    );
+
+    await handler({
+      sessionKey: "global",
+      message: { role: "assistant", content: [{ type: "text", text: "private owner" }] },
+      messageId: "message-retired-owner",
+      messageSeq: 1,
+    });
+
+    expect(getSessionMessageSubscribers).toHaveBeenCalledWith("agent:ops:global");
+    expect(getSessionMessageSubscribers).not.toHaveBeenCalledWith("agent:research:global");
+    expect(loadGatewaySessionRowMock).not.toHaveBeenCalled();
+    expect(broadcastToConnIds).toHaveBeenCalledOnce();
+    expect(broadcastToConnIds).toHaveBeenCalledWith(
+      "sessions.changed",
+      expect.objectContaining({ sessionKey: "global", phase: "message" }),
+      new Set(["conn-1", "conn-ops"]),
+      {
+        agentId: "ops",
+        dropIfSlow: true,
+        sessionKeys: ["agent:ops:global"],
+        sessionEventSubscriptionKeys: ["agent:ops:global"],
+      },
+    );
+    expectPrivateSessionInvalidation(broadcastToConnIds.mock.calls[0]?.[1]);
   });
 
   it("broadcasts user idempotency keys in session.message metadata", async () => {
@@ -599,12 +583,13 @@ describe("createTranscriptUpdateBroadcastHandler", () => {
   it("publishes message-phase changes to plugins without websocket subscribers", async () => {
     const received = vi.fn();
     const unsubscribe = subscribePluginSessionsChanged(received);
-    const { broadcastToConnIds } = createGatewayBroadcaster({ clients: new Set() });
+    const { broadcastToConnIds } = createGatewayBroadcaster({
+      clients: new GatewayClientRegistry(),
+    });
     const handler = createTranscriptUpdateBroadcastHandler({
       broadcastToConnIds,
       sessionEventSubscribers: { getAll: () => new Set() },
       sessionMessageSubscribers: { get: () => new Set() },
-      chatAbortControllers: new Map(),
     });
     projectChatDisplayMessageMock.mockReturnValueOnce(undefined).mockReturnValueOnce(undefined);
 
@@ -626,12 +611,14 @@ describe("createTranscriptUpdateBroadcastHandler", () => {
     }
   });
 
-  it("resolves messageSeq through a partial target's explicit store", async () => {
+  it("reads the canonical message through the target's explicit store", async () => {
     loadAccessorSessionEntryReadOnlyMock.mockReturnValue({
       sessionId: "sess-main",
       updatedAt: 1,
     });
-    readSessionMessageCountAsyncMock.mockResolvedValue(7);
+    readSessionMessageByIdAsyncMock.mockResolvedValueOnce(
+      storedMessage("message-partial-target", 7),
+    );
     const { broadcastToConnIds, handler } = createHandler(false);
 
     await handler({
@@ -657,265 +644,149 @@ describe("createTranscriptUpdateBroadcastHandler", () => {
   });
 
   it.each([
-    {
-      name: "distinct session keys",
-      slowAgentId: "main",
-      slowSessionKey: "agent:main:slow",
-      fastAgentId: "main",
-      fastSessionKey: "agent:main:main",
-    },
-    {
-      name: "global sessions owned by different agents",
-      slowAgentId: "main",
-      slowSessionKey: "global",
-      fastAgentId: "research",
-      fastSessionKey: "global",
-    },
-  ])("does not stall $name behind another transcript's pending seq read", async (scenario) => {
-    let releaseSlowCount: (value: number | undefined) => void = () => undefined;
-    readSessionMessageCountAsyncMock.mockImplementation(
-      (params: { agentId?: string; sessionKey?: string }) =>
-        params.agentId === scenario.slowAgentId && params.sessionKey === scenario.slowSessionKey
-          ? new Promise<number | undefined>((resolve) => {
+    ["distinct session keys", "agent:main:slow", "main", "agent:main:main"],
+    ["global sessions owned by different agents", "global", "research", "global"],
+  ])(
+    "does not stall %s behind another transcript's pending seq read",
+    async (_name, slowSessionKey, fastAgentId, fastSessionKey) => {
+      let releaseSlowCount: (value: number) => void = () => undefined;
+      const readSequence = vi.fn((params: { agentId?: string; sessionKey?: string }) =>
+        params.agentId === "main" && params.sessionKey === slowSessionKey
+          ? new Promise<number>((resolve) => {
               releaseSlowCount = resolve;
             })
           : Promise.resolve(3),
-    );
-    loadAccessorSessionEntryReadOnlyMock.mockReturnValue({ sessionId: "sess-main" });
-    const { broadcastToConnIds, handler } = createHandler(false);
+      );
+      readSessionMessageCountAsyncMock.mockImplementation(readSequence);
+      readSessionMessageByIdAsyncMock.mockImplementation(async (scope, id: string) =>
+        storedMessage(id, await readSequence(scope)),
+      );
+      loadAccessorSessionEntryReadOnlyMock.mockReturnValue({ sessionId: "sess-main" });
+      const { broadcastToConnIds, handler } = createHandler(false);
 
-    // No messageSeq: the slow lane blocks on its async transcript count.
-    const slowTask = handler({
-      message: { role: "assistant", content: [{ type: "text", text: "slow" }] },
-      messageId: "slow-1",
-      target: {
-        agentId: scenario.slowAgentId,
-        sessionId: "sess-slow",
-        sessionKey: scenario.slowSessionKey,
-        storePath: "/tmp/slow-sessions.json",
-      },
-    });
-    await vi.waitFor(() => expect(readSessionMessageCountAsyncMock).toHaveBeenCalledOnce());
-
-    const fastTask = handler({
-      sessionFile: "/tmp/sess-main.jsonl",
-      agentId: scenario.fastAgentId,
-      sessionKey: scenario.fastSessionKey,
-      message: { role: "assistant", content: [{ type: "text", text: "fast" }] },
-      messageId: "fast-1",
-      messageSeq: 1,
-    });
-
-    try {
-      // The independent lane must publish while the other transcript remains parked.
-      await vi.waitFor(() => expect(broadcastToConnIds).toHaveBeenCalledOnce(), {
-        timeout: 100,
-        interval: 5,
+      // No messageSeq: the slow lane blocks on its async transcript count.
+      const slowTask = handler({
+        message: { role: "assistant", content: [{ type: "text", text: "slow" }] },
+        messageId: "slow-1",
+        target: {
+          agentId: "main",
+          sessionId: "sess-slow",
+          sessionKey: slowSessionKey,
+          storePath: "/tmp/slow-sessions.json",
+        },
       });
-      expect(broadcastToConnIds.mock.calls[0]?.[1]).toMatchObject({ messageId: "fast-1" });
-    } finally {
-      releaseSlowCount(5);
-      await Promise.allSettled([slowTask, fastTask]);
-    }
+      await vi.waitFor(() => expect(readSequence).toHaveBeenCalledOnce());
 
-    expect(broadcastToConnIds).toHaveBeenCalledTimes(2);
-    expect(broadcastToConnIds.mock.calls[1]?.[1]).toMatchObject({ messageId: "slow-1" });
-  });
+      const fastTask = handler({
+        sessionFile: "/tmp/sess-main.jsonl",
+        agentId: fastAgentId,
+        sessionKey: fastSessionKey,
+        message: { role: "assistant", content: [{ type: "text", text: "fast" }] },
+        messageId: "fast-1",
+        messageSeq: 1,
+      });
+
+      try {
+        // The independent lane must publish while the other transcript remains parked.
+        await vi.waitFor(() => expect(broadcastToConnIds).toHaveBeenCalledOnce(), {
+          timeout: 100,
+          interval: 5,
+        });
+        expect(broadcastToConnIds.mock.calls[0]?.[1]).toMatchObject({ messageId: "fast-1" });
+      } finally {
+        releaseSlowCount(5);
+        await Promise.allSettled([slowTask, fastTask]);
+      }
+
+      expect(broadcastToConnIds).toHaveBeenCalledTimes(2);
+      expect(broadcastToConnIds.mock.calls[1]?.[1]).toMatchObject({ messageId: "slow-1" });
+    },
+  );
 
   it.each([
-    {
-      name: "an agent-qualified session",
-      firstSessionKey: "agent:main:main",
-      secondSessionKey: "agent:main:main",
-      agentId: "main",
-    },
-    {
-      name: "an ownerless legacy global update",
-      firstSessionKey: "global",
-      secondSessionKey: "global",
-      agentId: "main",
-    },
-    {
-      name: "a global session and its agent-qualified alias",
-      firstSessionKey: "global",
-      secondSessionKey: "agent:main:global",
-      agentId: "main",
-    },
-    {
-      name: "a marker-only update and its canonical transcript key",
-      firstSessionKey: "agent:main:main",
-      secondSessionKey: "agent:main:main",
-      agentId: "main",
-      markerOnly: true,
-    },
-    {
-      name: "an ownerless global update in its configured fixed store",
-      firstSessionKey: "global",
-      secondSessionKey: "global",
-      agentId: "ops",
-      config: {
-        session: { store: "/tmp/owned-shared.sqlite" },
-        agents: {
-          ownership: "explicit",
-          defaults: { sessionStore: { agentId: "ops" } },
-          entries: { ops: {}, research: {} },
-        },
-      },
-    },
-  ])("preserves message order for $name", async (scenario) => {
-    runtimeConfigState.value = scenario.config ?? {};
-    let releaseFirstCount: (value: number | undefined) => void = () => undefined;
-    readSessionMessageCountAsyncMock.mockImplementationOnce(
-      () =>
-        new Promise<number | undefined>((resolve) => {
-          releaseFirstCount = resolve;
-        }),
-    );
-    loadAccessorSessionEntryReadOnlyMock.mockReturnValue({ sessionId: "sess-main" });
-    if (scenario.markerOnly) {
-      listAccessorSessionEntriesReadOnlyMock.mockReturnValue([
-        { key: scenario.firstSessionKey, entry: { sessionId: "sess-main" } },
-      ]);
-      resolveTranscriptSessionKeyBySessionIdMock.mockReturnValue(scenario.firstSessionKey);
-    }
-    const { broadcastToConnIds, handler } = createHandler(false);
-
-    const firstTask = handler({
-      message: { role: "assistant", content: [{ type: "text", text: "first" }] },
-      messageId: "ordered-1",
-      ...(scenario.markerOnly
-        ? { sessionFile: `sqlite:${scenario.agentId}:sess-main:/tmp/explicit-sessions.json` }
-        : {
-            target: {
-              agentId: scenario.agentId,
-              sessionId: "sess-main",
-              sessionKey: scenario.firstSessionKey,
-              storePath: "/tmp/explicit-sessions.json",
-            },
-          }),
-    });
-    await vi.waitFor(() => expect(readSessionMessageCountAsyncMock).toHaveBeenCalledOnce());
-    const secondTask = handler({
-      sessionFile: "/tmp/sess-main.jsonl",
-      sessionKey: scenario.secondSessionKey,
-      message: { role: "assistant", content: [{ type: "text", text: "second" }] },
-      messageId: "ordered-2",
-      messageSeq: 2,
-    });
-
-    await Promise.resolve();
-    await Promise.resolve();
-    try {
-      expect(broadcastToConnIds).not.toHaveBeenCalled();
-    } finally {
-      releaseFirstCount(1);
-      await Promise.allSettled([firstTask, secondTask]);
-    }
-    expect(broadcastToConnIds.mock.calls.map((call) => call[1]?.messageId)).toEqual([
-      "ordered-1",
-      "ordered-2",
-    ]);
-  });
-});
-
-describe("createLifecycleEventBroadcastHandler", () => {
-  beforeEach(() => {
-    vi.clearAllMocks();
-    resolveEmbeddedAgentRunProgressStateMock.mockReturnValue(undefined);
-    loadGatewaySessionRowMock.mockReturnValue(sessionRow);
-    runtimeConfigState.value = {};
-    sessionRow.key = "agent:main:main";
-  });
-  it("projects swarm phase and log payload fields", () => {
-    const broadcastToConnIds = vi.fn();
-    const handler = createLifecycleEventBroadcastHandler({
-      broadcastToConnIds,
-      sessionEventSubscribers: { getAll: () => new Set(["conn-1"]) },
-      chatAbortControllers: new Map(),
-    });
-
-    handler({
-      sessionKey: "agent:main:main",
-      reason: "swarm-note",
-      swarmGroupId: "swarm:agent:main:main:run-1",
-      kind: "phase",
-      text: "Research",
-    } as never);
-
-    expect(broadcastToConnIds).toHaveBeenCalledWith(
-      "sessions.changed",
-      expect.objectContaining({
-        swarmGroupId: "swarm:agent:main:main:run-1",
-        kind: "phase",
-        text: "Research",
-      }),
-      new Set(["conn-1"]),
-      { dropIfSlow: true },
-    );
-  });
-
-  it("publishes lifecycle changes to plugins without websocket subscribers", async () => {
-    const received = vi.fn();
-    const unsubscribe = subscribePluginSessionsChanged(received);
-    const { broadcastToConnIds } = createGatewayBroadcaster({ clients: new Set() });
-    const handler = createLifecycleEventBroadcastHandler({
-      broadcastToConnIds,
-      sessionEventSubscribers: { getAll: () => new Set() },
-      chatAbortControllers: new Map(),
-    });
-
-    try {
-      handler({
-        sessionKey: "agent:main:main",
-        reason: "rename",
-        label: "Renamed session",
+    ["an agent-qualified session", "agent:main:main", "agent:main:main", "main", false],
+    ["an ownerless legacy global update", "global", "global", "main", false],
+    [
+      "a global session and its agent-qualified alias",
+      "global",
+      "agent:main:global",
+      "main",
+      false,
+    ],
+    [
+      "a marker-only update and its canonical transcript key",
+      "agent:main:main",
+      "agent:main:main",
+      "main",
+      true,
+    ],
+    ["an ownerless global update in its configured fixed store", "global", "global", "ops", false],
+  ] as const)(
+    "preserves message order for %s",
+    async (_name, firstSessionKey, secondSessionKey, agentId, markerOnly) => {
+      runtimeConfigState.value =
+        agentId === "ops"
+          ? {
+              ...fixedStoreRuntimeConfig("ops", ["ops", "research"]),
+              session: { store: "/tmp/owned-shared.sqlite" },
+            }
+          : {};
+      let releaseFirstCount: (value: number) => void = () => undefined;
+      const firstRead = new Promise<number>((resolve) => {
+        releaseFirstCount = resolve;
       });
+      readSessionMessageCountAsyncMock.mockImplementationOnce(() => firstRead);
+      readSessionMessageByIdAsyncMock.mockImplementationOnce(async (_scope, id: string) =>
+        storedMessage(id, await firstRead),
+      );
+      loadAccessorSessionEntryReadOnlyMock.mockReturnValue({ sessionId: "sess-main" });
+      if (markerOnly) {
+        listAccessorSessionEntriesReadOnlyMock.mockReturnValue([
+          { key: firstSessionKey, entry: { sessionId: "sess-main" } },
+        ]);
+      }
+      const { broadcastToConnIds, handler } = createHandler(false);
+
+      const firstTask = handler({
+        message: { role: "assistant", content: [{ type: "text", text: "first" }] },
+        messageId: "ordered-1",
+        ...(markerOnly
+          ? { sessionFile: `sqlite:${agentId}:sess-main:/tmp/explicit-sessions.json` }
+          : {
+              target: {
+                agentId,
+                sessionId: "sess-main",
+                sessionKey: firstSessionKey,
+                storePath: "/tmp/explicit-sessions.json",
+              },
+            }),
+      });
+      await vi.waitFor(() =>
+        expect(
+          readSessionMessageCountAsyncMock.mock.calls.length +
+            readSessionMessageByIdAsyncMock.mock.calls.length,
+        ).toBe(1),
+      );
+      const secondTask = handler({
+        sessionFile: "/tmp/sess-main.jsonl",
+        sessionKey: secondSessionKey,
+        message: { role: "assistant", content: [{ type: "text", text: "second" }] },
+        messageId: "ordered-2",
+        messageSeq: 2,
+      });
+
       await Promise.resolve();
-      expect(received).toHaveBeenCalledWith({
-        sessionKey: "agent:main:main",
-        agentId: "main",
-        label: "Renamed session",
-        reason: "rename",
-      });
-    } finally {
-      unsubscribe();
-    }
-  });
-
-  it("projects active state for a bare lifecycle event through the persisted owner", () => {
-    runtimeConfigState.value = {
-      session: { store: "/tmp/owned-shared.sqlite" },
-      agents: {
-        ownership: "explicit",
-        defaults: { sessionStore: { agentId: "ops" } },
-        entries: { ops: {}, research: {} },
-      },
-    };
-    sessionRow.key = "global";
-    const activeRun = {
-      ...createActiveRun(true),
-      agentId: "ops",
-      sessionKey: "global",
-    };
-    const broadcastToConnIds = vi.fn();
-    const handler = createLifecycleEventBroadcastHandler({
-      broadcastToConnIds,
-      sessionEventSubscribers: { getAll: () => new Set(["conn-1"]) },
-      chatAbortControllers: new Map([["run-before-finalize", activeRun]]),
-    });
-
-    handler({ sessionKey: "global", reason: "updated" });
-
-    expect(loadGatewaySessionRowMock).toHaveBeenCalledWith("global", { agentId: "ops" });
-    expect(broadcastToConnIds).toHaveBeenCalledWith(
-      "sessions.changed",
-      expect.objectContaining({
-        sessionKey: "global",
-        hasActiveRun: true,
-        activeRunIds: ["run-before-finalize"],
-      }),
-      new Set(["conn-1"]),
-      { dropIfSlow: true },
-    );
-  });
+      await Promise.resolve();
+      try {
+        expect(broadcastToConnIds).not.toHaveBeenCalled();
+      } finally {
+        releaseFirstCount(1);
+        await Promise.allSettled([firstTask, secondTask]);
+      }
+      expect(broadcastToConnIds.mock.calls.map((call) => call[1]?.messageId)).toEqual([
+        "ordered-1",
+        "ordered-2",
+      ]);
+    },
+  );
 });

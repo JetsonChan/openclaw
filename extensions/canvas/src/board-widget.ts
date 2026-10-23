@@ -1,16 +1,9 @@
 import type { OpenClawPluginApi } from "openclaw/plugin-sdk/plugin-entry";
+import { escapeHtml } from "openclaw/plugin-sdk/text-utility-runtime";
 import { validateSupportedA2UIJsonl } from "./a2ui-jsonl.js";
 
 const A2UI_V08_BUNDLE_PATH = "/__openclaw__/a2ui/a2ui.bundle.js";
 const A2UI_V09_BUNDLE_PATH = "/__openclaw__/a2ui/a2ui-v0.9.bundle.js";
-
-function escapeHtmlAttribute(value: string): string {
-  return value
-    .replaceAll("&", "&amp;")
-    .replaceAll('"', "&quot;")
-    .replaceAll("<", "&lt;")
-    .replaceAll(">", "&gt;");
-}
 
 function bootScript(messages: unknown[], promptGranted: boolean): string {
   const boot = JSON.stringify({ messages, actionTier: promptGranted ? "prompt" : "state" })
@@ -22,7 +15,7 @@ function bootScript(messages: unknown[], promptGranted: boolean): string {
 
 function resourceScript(path: string, url: string): string {
   if (url !== path) {
-    return `<script src="${escapeHtmlAttribute(url)}"></script>`;
+    return `<script src="${escapeHtml(url)}"></script>`;
   }
   const serializedPath = JSON.stringify(path).replaceAll("<", "\\u003c");
   return `<script>(()=>{const match=location.pathname.match(/^\\/__openclaw__\\/cap\\/[^/]+/u);const script=document.createElement("script");script.src=(match?.[0]??"")+${serializedPath};document.head.appendChild(script);})();</script>`;
@@ -37,6 +30,13 @@ export const canvasA2UIBoardWidgetKind: Parameters<
   resources: {
     surface: "canvas",
     paths: [A2UI_V08_BUNDLE_PATH, A2UI_V09_BUNDLE_PATH],
+    readPublicResource: async (resourcePath) => {
+      if (resourcePath !== A2UI_V08_BUNDLE_PATH && resourcePath !== A2UI_V09_BUNDLE_PATH) {
+        return undefined;
+      }
+      const { readPublicA2uiResource } = await import("./host/a2ui.js");
+      return await readPublicA2uiResource(resourcePath);
+    },
   },
   validateSource(source) {
     validateSupportedA2UIJsonl(source);

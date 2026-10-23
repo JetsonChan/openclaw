@@ -1,25 +1,24 @@
-/**
- * Browser CLI inspection commands for screenshots and snapshots.
- */
 import fs from "node:fs/promises";
 import path from "node:path";
 import type { Command } from "commander";
+import { inheritOptionFromParent } from "openclaw/plugin-sdk/cli-runtime";
+import {
+  parseStrictNonNegativeInteger,
+  parseStrictPositiveInteger,
+} from "openclaw/plugin-sdk/number-runtime";
+import { captureRuntimeConfigAsyncReader } from "openclaw/plugin-sdk/runtime-config-snapshot";
+import { defaultRuntime } from "openclaw/plugin-sdk/runtime-env";
 import { normalizeOptionalString } from "openclaw/plugin-sdk/string-coerce-runtime";
+import { shortenHomePath } from "openclaw/plugin-sdk/text-utility-runtime";
+import type { SnapshotResult } from "../browser/client.js";
 import { writeExternalFileWithinOutputRoot } from "../browser/output-files.js";
 import {
   BROWSER_TAB_REFERENCE_HELP,
   callBrowserRequest,
-  parseBrowserNonNegativeIntegerValue,
-  parseBrowserPositiveIntegerValue,
+  parseBrowserPositiveIntegerOption,
+  runBrowserCliCommand,
   type BrowserParentOpts,
 } from "./browser-cli-shared.js";
-import {
-  danger,
-  defaultRuntime,
-  getRuntimeConfig,
-  shortenHomePath,
-  type SnapshotResult,
-} from "./core-api.js";
 
 function parseOptionalIntegerOption(
   value: string | undefined,
@@ -30,13 +29,9 @@ function parseOptionalIntegerOption(
     return undefined;
   }
   const parsed =
-    opts.min === 0
-      ? parseBrowserNonNegativeIntegerValue(value)
-      : parseBrowserPositiveIntegerValue(value);
+    opts.min === 0 ? parseStrictNonNegativeInteger(value) : parseStrictPositiveInteger(value);
   if (parsed === undefined || parsed < opts.min) {
-    defaultRuntime.error(danger(`Invalid ${label}: must be an integer >= ${opts.min}`));
-    defaultRuntime.exit(1);
-    return undefined;
+    throw new Error(`Invalid ${label}: must be an integer >= ${opts.min}`);
   }
   return parsed;
 }
@@ -45,16 +40,30 @@ function parseBrowserChoiceOption<const T extends string>(
   value: string,
   label: string,
   choices: readonly T[],
-): T | undefined {
-  if ((choices as readonly string[]).includes(value)) {
-    return value as T;
+): T {
+  const choice = choices.find((candidate) => candidate === value);
+  if (choice !== undefined) {
+    return choice;
   }
-  defaultRuntime.error(danger(`Invalid ${label}: expected ${choices.join(" or ")}`));
-  defaultRuntime.exit(1);
-  return undefined;
+  throw new Error(`Invalid ${label}: expected ${choices.join(" or ")}`);
 }
 
-/** Registers Browser screenshot and snapshot commands. */
+function resolveBrowserInspectTimeout(
+  command: Command,
+  parent: BrowserParentOpts,
+  value: string | undefined,
+): { parent: BrowserParentOpts; timeoutMs?: number } {
+  const timeout =
+    command.getOptionValueSource("timeout") === "cli"
+      ? value
+      : inheritOptionFromParent<string>(command, "timeout", "cli");
+  if (timeout === undefined) {
+    return { parent };
+  }
+  const timeoutMs = parseBrowserPositiveIntegerOption(timeout, "--timeout");
+  return { parent: { ...parent, timeout: String(timeoutMs) }, timeoutMs };
+}
+
 export function registerBrowserInspectCommands(
   browser: Command,
   parentOpts: (cmd: Command) => BrowserParentOpts,
@@ -72,15 +81,14 @@ export function registerBrowserInspectCommands(
       false,
     )
     .option("--type <png|jpeg>", "Output type (default: png)", "png")
+    .option("--timeout <ms>", "Timeout in ms")
     .action(async (targetId: string | undefined, opts, cmd) => {
       const parent = parentOpts(cmd);
       const profile = parent?.browserProfile;
       const type = parseBrowserChoiceOption(opts.type, "--type", ["png", "jpeg"]);
-      if (type === undefined) {
-        return;
-      }
-      try {
-        const result = await callBrowserRequest<{ path: string }>(parent, {
+      await runBrowserCliCommand(async () => {
+        const request = resolveBrowserInspectTimeout(cmd, parent, opts.timeout);
+        const result = await callBrowserRequest<{ path: string }>(request.parent, {
           method: "POST",
           path: "/screenshot",
           query: profile ? { profile } : undefined,
@@ -91,6 +99,7 @@ export function registerBrowserInspectCommands(
             element: normalizeOptionalString(opts.element),
             labels: Boolean(opts.labels),
             type,
+            ...(request.timeoutMs === undefined ? {} : { timeoutMs: request.timeoutMs }),
           },
         });
         if (parent?.json) {
@@ -98,10 +107,7 @@ export function registerBrowserInspectCommands(
           return;
         }
         defaultRuntime.log(shortenHomePath(result.path));
-      } catch (err) {
-        defaultRuntime.error(danger(String(err)));
-        defaultRuntime.exit(1);
-      }
+      }, "inline");
     });
 
   browser
@@ -120,38 +126,28 @@ export function registerBrowserInspectCommands(
     .option("--labels", "Include label overlay screenshot with annotations", false)
     .option("--urls", "Append discovered link URLs to AI snapshots", false)
     .option("--out <path>", "Write snapshot to a file")
+    .option("--timeout <ms>", "Timeout in ms")
     .action(async (opts, cmd: Command) => {
       const parent = parentOpts(cmd);
       const profile = parent?.browserProfile;
       const format = parseBrowserChoiceOption(opts.format, "--format", ["aria", "ai"]);
-      if (format === undefined) {
-        return;
-      }
       const explicitMode =
         opts.mode === undefined
           ? undefined
           : parseBrowserChoiceOption(opts.mode, "--mode", ["efficient"]);
-      if (opts.mode !== undefined && explicitMode === undefined) {
-        return;
-      }
       const formatWasExplicit = cmd.getOptionValueSource("format") === "cli";
       const configMode =
         !formatWasExplicit &&
         format === "ai" &&
-        getRuntimeConfig().browser?.snapshotDefaults?.mode === "efficient"
+        (await captureRuntimeConfigAsyncReader()()).browser?.snapshotDefaults?.mode === "efficient"
           ? "efficient"
           : undefined;
       const mode =
         opts.efficient === true || explicitMode === "efficient" ? "efficient" : configMode;
       const limit = parseOptionalIntegerOption(opts.limit, "--limit", { min: 1 });
       const depth = parseOptionalIntegerOption(opts.depth, "--depth", { min: 0 });
-      if (
-        (opts.limit !== undefined && limit === undefined) ||
-        (opts.depth !== undefined && depth === undefined)
-      ) {
-        return;
-      }
-      try {
+      await runBrowserCliCommand(async () => {
+        const request = resolveBrowserInspectTimeout(cmd, parent, opts.timeout);
         const query: Record<string, string | number | boolean | undefined> = {
           format,
           targetId: normalizeOptionalString(opts.targetId),
@@ -165,12 +161,14 @@ export function registerBrowserInspectCommands(
           urls: opts.urls ? true : undefined,
           mode,
           profile,
+          ...(request.timeoutMs === undefined ? {} : { timeoutMs: request.timeoutMs }),
         };
-        const result = await callBrowserRequest<SnapshotResult>(parent, {
+        const result = await callBrowserRequest<SnapshotResult>(request.parent, {
           method: "GET",
           path: "/snapshot",
           query,
         });
+        const imagePath = result.format === "ai" ? result.imagePath : undefined;
 
         if (opts.out) {
           const payload =
@@ -181,50 +179,40 @@ export function registerBrowserInspectCommands(
               await fs.writeFile(tempPath, payload, "utf8");
             },
           });
-          if (parent?.json) {
-            defaultRuntime.writeJson({
-              ok: true,
-              out: opts.out,
-              ...(result.format === "ai" && result.imagePath
-                ? { imagePath: result.imagePath }
-                : {}),
-            });
-          } else {
-            defaultRuntime.log(shortenHomePath(opts.out));
-            if (result.format === "ai" && result.imagePath) {
-              defaultRuntime.log(shortenHomePath(result.imagePath));
-            }
-          }
-          return;
         }
 
         if (parent?.json) {
-          defaultRuntime.writeJson(result);
+          defaultRuntime.writeJson(
+            opts.out
+              ? {
+                  ok: true,
+                  out: opts.out,
+                  ...(imagePath ? { imagePath } : {}),
+                }
+              : result,
+          );
           return;
         }
 
-        if (result.format === "ai") {
+        if (opts.out) {
+          defaultRuntime.log(shortenHomePath(opts.out));
+        } else if (result.format === "ai") {
           defaultRuntime.log(result.snapshot);
-          if (result.imagePath) {
-            defaultRuntime.log(shortenHomePath(result.imagePath));
-          }
-          return;
+        } else {
+          defaultRuntime.log(
+            result.nodes
+              .map((n) => {
+                const indent = "  ".repeat(Math.min(20, n.depth));
+                const name = n.name ? ` "${n.name}"` : "";
+                const value = n.value ? ` = "${n.value}"` : "";
+                return `${indent}- ${n.role}${name}${value} [ref=${n.ref}]`;
+              })
+              .join("\n"),
+          );
         }
-
-        const nodes = "nodes" in result ? result.nodes : [];
-        defaultRuntime.log(
-          nodes
-            .map((n) => {
-              const indent = "  ".repeat(Math.min(20, n.depth));
-              const name = n.name ? ` "${n.name}"` : "";
-              const value = n.value ? ` = "${n.value}"` : "";
-              return `${indent}- ${n.role}${name}${value}`;
-            })
-            .join("\n"),
-        );
-      } catch (err) {
-        defaultRuntime.error(danger(String(err)));
-        defaultRuntime.exit(1);
-      }
+        if (imagePath) {
+          defaultRuntime.log(shortenHomePath(imagePath));
+        }
+      }, "inline");
     });
 }

@@ -1,5 +1,11 @@
 // Slack tests cover suggested-prompt capability detection across view generations.
 import type { App } from "@slack/bolt";
+import {
+  WebAPIHTTPError,
+  WebAPIPlatformError,
+  WebAPIRateLimitedError,
+  WebAPIRequestError,
+} from "@slack/web-api";
 import { describe, expect, it, vi } from "vitest";
 import { updateSlackSuggestedPrompts } from "./suggested-prompts.js";
 
@@ -17,7 +23,7 @@ describe("updateSlackSuggestedPrompts", () => {
   it("omits thread_ts for the Agent View capability probe", async () => {
     const setSuggestedPrompts = vi.fn().mockResolvedValue({ ok: true });
 
-    const updated = await updateSlackSuggestedPrompts({
+    await updateSlackSuggestedPrompts({
       botToken: "",
       client: createSlackClient(setSuggestedPrompts),
       channelId: "D123",
@@ -25,7 +31,6 @@ describe("updateSlackSuggestedPrompts", () => {
       prompts: [{ title: "Draft a reply", message: "Help me draft a reply." }],
     });
 
-    expect(updated).toBe(true);
     expect(setSuggestedPrompts).toHaveBeenCalledWith({
       token: "",
       channel_id: "D123",
@@ -34,10 +39,32 @@ describe("updateSlackSuggestedPrompts", () => {
     });
   });
 
-  it("rejects the capability probe when Slack requires an Assistant View thread", async () => {
-    const setSuggestedPrompts = vi.fn().mockRejectedValue({
-      data: { ok: false, error: "invalid_arguments" },
-    });
+  it.each([
+    ["successful update", undefined, "accepted"],
+    ["non-Agent app", new WebAPIPlatformError({ ok: false, error: "not_agent_app" }), "rejected"],
+    ["missing scope", new WebAPIPlatformError({ ok: false, error: "missing_scope" }), "rejected"],
+    [
+      "internal error",
+      new WebAPIPlatformError({ ok: false, error: "internal_error" }),
+      "internal_error",
+    ],
+    [
+      "other platform error",
+      new WebAPIPlatformError({ ok: false, error: "invalid_auth" }),
+      "failed",
+    ],
+    ["request failure", new WebAPIRequestError(new Error("connection reset")), "failed"],
+    [
+      "HTTP failure",
+      new WebAPIHTTPError(500, "Internal Server Error", {}, "internal_error"),
+      "failed",
+    ],
+    ["rate limit", new WebAPIRateLimitedError(30), "failed"],
+    ["unknown error", new Error("internal_error"), "failed"],
+  ] as const)("classifies %s", async (_name, error, outcome) => {
+    const setSuggestedPrompts = error
+      ? vi.fn().mockRejectedValue(error)
+      : vi.fn().mockResolvedValue({ ok: true });
 
     const updated = await updateSlackSuggestedPrompts({
       botToken: "",
@@ -46,6 +73,45 @@ describe("updateSlackSuggestedPrompts", () => {
       prompts: [{ title: "Draft a reply", message: "Help me draft a reply." }],
     });
 
-    expect(updated).toBe(false);
+    expect(updated).toBe(outcome);
   });
+
+  it.each([
+    [
+      "permanent authorization failure",
+      new WebAPIPlatformError({ ok: false, error: "invalid_auth" }),
+      "failed",
+    ],
+    ["ordinary error", new Error("connection reset"), "failed"],
+    [
+      "incomplete rate-limit signature",
+      new Error("Retry header did not contain a valid timeout"),
+      "failed",
+    ],
+    [
+      "extended rate-limit signature",
+      new Error(
+        "Retry header did not contain a valid timeout (url: https://slack.test/api/test, retry-after header: null) extra",
+      ),
+      "failed",
+    ],
+    [
+      "threadless capability response",
+      new WebAPIPlatformError({ ok: false, error: "internal_error" }),
+      "internal_error",
+    ],
+  ] as const)(
+    "preserves the outcome for %s during durable retries",
+    async (_name, error, outcome) => {
+      await expect(
+        updateSlackSuggestedPrompts({
+          botToken: "",
+          client: createSlackClient(vi.fn().mockRejectedValue(error)),
+          channelId: "D123",
+          retryTransientErrors: true,
+          prompts: [{ title: "Draft a reply", message: "Help me draft a reply." }],
+        }),
+      ).resolves.toBe(outcome);
+    },
+  );
 });

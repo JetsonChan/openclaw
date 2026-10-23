@@ -1,3 +1,6 @@
+import { controlUiAccentInk } from "./accent-contrast.ts";
+import { controlUiDocumentHead } from "./control-ui-document-head.ts";
+
 const ACCENT_CSS_VARIABLES = [
   "--ring",
   "--accent",
@@ -16,11 +19,56 @@ const ACCENT_CSS_VARIABLES = [
 
 let operatorSeamColor: string | undefined;
 let userAccentOverride: string | undefined;
+const systemChromeRevisions = new WeakMap<HTMLElement, string>();
+
+// Project the independently rendered shell into the static document's chrome and head metadata.
+export function syncControlUiSystemChrome(paletteChanged = false, chatShell?: boolean): void {
+  if (typeof document === "undefined") {
+    return;
+  }
+  const root = document.documentElement;
+  const hasChatShell = chatShell ?? root.classList.contains("control-ui-chat-shell");
+  if (root.classList.contains("control-ui-chat-shell") !== hasChatShell) {
+    root.classList.toggle("control-ui-chat-shell", hasChatShell);
+  }
+  const narrow = globalThis.matchMedia?.(
+    "(max-width: 768px), (max-width: 932px) and (max-height: 500px) and (orientation: landscape)",
+  ).matches;
+  const revision = () =>
+    JSON.stringify([
+      root.dataset.theme,
+      root.dataset.themeMode,
+      root.getAttribute("style"),
+      narrow && hasChatShell,
+    ]);
+  if (!paletteChanged && systemChromeRevisions.get(root) === revision()) {
+    return;
+  }
+  const computedStyle = getComputedStyle(root);
+  const pageBackground = computedStyle.getPropertyValue("--bg").trim();
+  const background =
+    narrow && hasChatShell
+      ? computedStyle.getPropertyValue("--bg-content").trim() || pageBackground
+      : pageBackground;
+  if (!background) {
+    return;
+  }
+  root.style.setProperty("--control-ui-system-chrome-background", background);
+  for (const meta of controlUiDocumentHead().themeColors) {
+    meta.content = background;
+    meta.removeAttribute("media");
+  }
+  // Include our own output so the next shell commit does not invalidate the sample.
+  systemChromeRevisions.set(root, revision());
+}
 
 export function applyControlUiAccent(userAccent?: string): void {
   userAccentOverride = userAccent;
   const root = document.documentElement;
-  const hex = (userAccentOverride ?? operatorSeamColor)?.trim().replace(/^#/, "");
+  // An explicit theme selection must not expose the lower-precedence seam color.
+  const accent =
+    userAccentOverride === "theme" ? undefined : (userAccentOverride ?? operatorSeamColor);
+  const hex = accent?.trim().replace(/^#/, "");
   const color = hex && /^[0-9a-fA-F]{6}$/.test(hex) ? `#${hex}` : null;
   if (!color) {
     for (const property of ACCENT_CSS_VARIABLES) {
@@ -29,14 +77,7 @@ export function applyControlUiAccent(userAccent?: string): void {
     return;
   }
 
-  const linearChannel = (offset: number) => {
-    const channel = Number.parseInt(color.slice(offset, offset + 2), 16) / 255;
-    return channel <= 0.04045 ? channel / 12.92 : ((channel + 0.055) / 1.055) ** 2.4;
-  };
-  const luminance =
-    0.2126 * linearChannel(1) + 0.7152 * linearChannel(3) + 0.0722 * linearChannel(5);
-  // Black and white reach equal WCAG contrast at relative luminance 0.179.
-  const ink = luminance > 0.179 ? "#000000" : "#ffffff";
+  const ink = controlUiAccentInk(color);
   const mix = (variable: string, amount: number) =>
     `color-mix(in srgb, var(${variable}) ${amount}%, transparent)`;
 

@@ -1,5 +1,3 @@
-// Shared Logbook domain shapes used by the store, pipeline, and gateway methods.
-
 export type LogbookFrame = {
   id: number;
   capturedAtMs: number;
@@ -55,7 +53,7 @@ export type LogbookCard = {
   keyframeId?: number;
 };
 
-export type LogbookCardDraft = Omit<LogbookCard, "id">;
+export type LogbookCardDraft = Omit<LogbookCard, "id" | "keyframeId">;
 
 export type LogbookDayStats = {
   trackedMs: number;

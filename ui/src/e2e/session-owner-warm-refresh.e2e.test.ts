@@ -1,14 +1,12 @@
-import { mkdir } from "node:fs/promises";
-import path from "node:path";
-import type { Page } from "playwright";
 import { expect, it } from "vitest";
-import type { ApplicationContext } from "../app/context.ts";
-import { installMockGateway } from "../test-helpers/control-ui-e2e.ts";
+import { SIDEBAR_SESSION_ROSTER_LIMIT } from "../../../src/shared/session-list-limits.ts";
+import { getControlUiContextHandle } from "../test-helpers/control-ui-e2e-context.ts";
+import { controlUiSessionUrl, installMockGateway } from "../test-helpers/control-ui-e2e.ts";
 import { createControlUiE2eSuite } from "./control-ui-e2e-suite.test-support.ts";
+import { selectAllSidebarSessions } from "./sidebar-navigation.test-support.ts";
 
 const suite = createControlUiE2eSuite({ name: "Control UI warm owner-first refresh" });
-const captureProof = process.env.OPENCLAW_CAPTURE_UI_PROOF === "1";
-const proofDir = path.join(process.cwd(), ".artifacts", "control-ui-e2e", "session-owner-warm");
+const rosterMatch = { includeGlobal: true };
 
 function sessionRow(ownerId: string, key: string, label: string, updatedAt: number) {
   const owner = {
@@ -26,67 +24,39 @@ function sessionRow(ownerId: string, key: string, label: string, updatedAt: numb
   };
 }
 
-function rosterOf(sessions: ReturnType<typeof sessionRow>[]) {
-  return {
-    count: sessions.length,
-    owners: sessions.map((session) => session.owner.actor),
-    defaults: { contextTokens: null, model: null, modelProvider: null },
-    path: "",
-    sessions,
-    ts: 1,
-  };
-}
-
-async function captureSidebar(page: Page, fileName: string) {
-  if (!captureProof) {
-    return;
-  }
-  await mkdir(proofDir, { recursive: true });
-  await page.locator(".sidebar-sessions").screenshot({
-    animations: "disabled",
-    path: path.join(proofDir, fileName),
-  });
-}
-
 suite.define(() => {
-  it("keeps foreign-owned rows visible while a warm refresh's shared phase is in flight", async () => {
-    const context = await suite.browser.newContext({
-      viewport: { height: 800, width: 1200 },
-      ...(captureProof
-        ? { recordVideo: { dir: proofDir, size: { height: 800, width: 1200 } } }
-        : {}),
-    });
-    const page = await context.newPage();
-    const adaRow = sessionRow("profile-ada", "agent:main:ada", "Ada research", 2);
-    const bobRow = sessionRow("profile-bob", "agent:main:bob", "Bob operations", 1);
-    const sharedRoster = rosterOf([adaRow, bobRow]);
-    const ownerRoster = rosterOf([adaRow]);
-    const gateway = await installMockGateway(page, {
-      presenceUsers: [{ self: true, id: "profile-ada", name: "Ada" }],
-      sessionKey: "agent:main:ada",
-      methodResponses: {
-        "sessions.list": {
-          cases: [
-            { match: { ownerId: "profile-ada" }, response: ownerRoster },
-            { response: sharedRoster },
-          ],
+  it("keeps foreign-owned rows visible while one warm owner-first refresh is in flight", () =>
+    suite.withPage({ viewport: { height: 800, width: 1200 } }, async ({ page }) => {
+      const adaRow = sessionRow("profile-ada", "agent:main:ada", "Ada research", 2);
+      const bobRow = sessionRow("profile-bob", "agent:main:bob", "Bob operations", 1);
+      const sharedRoster = {
+        count: 2,
+        owners: [adaRow.owner.actor, bobRow.owner.actor],
+        defaults: { contextTokens: null, model: null, modelProvider: null },
+        path: "",
+        sessions: [adaRow, bobRow],
+        ts: 1,
+      };
+      const gateway = await installMockGateway(page, {
+        presenceUsers: [{ self: true, id: "profile-ada", name: "Ada" }],
+        sessionKey: "agent:main:ada",
+        methodResponses: {
+          "sessions.subscribe": { subscribed: true, list: sharedRoster },
+          "sessions.list": sharedRoster,
         },
-      },
-    });
+      });
 
-    try {
-      await page.goto(`${suite.server?.baseUrl ?? ""}chat`);
+      await page.goto(controlUiSessionUrl(suite.server.baseUrl, "agent:main:ada"));
       const ada = page.locator('[data-session-key="agent:main:ada"]');
       const bob = page.locator('[data-session-key="agent:main:bob"]');
       await ada.waitFor();
+      expect(await bob.count()).toBe(0);
+      await selectAllSidebarSessions(page);
       await bob.waitFor();
-      await captureSidebar(page, "warm-before-event.png");
 
-      // Hold the warm refresh open at its vulnerable point: release the
-      // owner-scoped response while the shared response remains deferred.
-      const before = (await gateway.getRequests("sessions.list")).length;
-      await gateway.deferNext("sessions.list", { ownerId: "profile-ada" });
-      await gateway.deferNext("sessions.list");
+      // Hold the single warm roster projection open and observe the existing DOM.
+      const before = (await gateway.getRequests("sessions.list", rosterMatch)).length;
+      await gateway.deferNext("sessions.list", rosterMatch);
       await gateway.emitGatewayEvent("sessions.changed", {
         sessionKey: adaRow.key,
         key: adaRow.key,
@@ -94,15 +64,13 @@ suite.define(() => {
         reason: "create",
         updatedAt: 3,
       });
-      await gateway.waitForRequest("sessions.list", { after: before + 1 });
-      const ownerProbe = await page.evaluateHandle(() => {
-        const app = document.querySelector<
-          HTMLElement & { runtime?: { context: ApplicationContext } }
-        >("openclaw-app");
+      await gateway.waitForRequest("sessions.list", { after: before, match: rosterMatch });
+      const applicationHandle = await getControlUiContextHandle(page);
+      const refreshProbe = await applicationHandle.evaluateHandle((application) => {
         const sidebar = document.querySelector<HTMLElement & { updateComplete: Promise<boolean> }>(
           "openclaw-app-sidebar",
         );
-        const sessions = app?.runtime?.context.sessions;
+        const sessions = application.sessions;
         const row = sidebar?.querySelector('[data-session-key="agent:main:bob"]');
         const scope = sessions?.captureConnectionScope();
         if (!sidebar || !sessions || !row || !scope) {
@@ -115,52 +83,45 @@ suite.define(() => {
           );
         });
         observer.observe(sidebar, { childList: true, subtree: true });
+        const revision = sessions.canonicalListRevision;
         return {
           observer,
-          revision: sessions.canonicalListRevision,
-          row,
-          scope,
+          revision,
           sessions,
           sidebar,
-          wasRemoved: () => removed,
+          snapshot: (completed = false) => ({
+            connected: sessions.isConnectionScopeCurrent(scope),
+            loading: sessions.state.loading,
+            revisionAdvanced: completed
+              ? sessions.canonicalListRevision > revision
+              : sessions.canonicalListRevision !== revision,
+            rowConnected: row.isConnected,
+            rowRemoved: removed,
+          }),
         };
       });
-      await gateway.resolveDeferred("sessions.list", ownerRoster);
-
-      const ownerPhase = await ownerProbe.evaluate(async (probe) => {
+      const inFlight = await refreshProbe.evaluate(async (probe) => {
         await new Promise<void>((resolve) => {
           requestAnimationFrame(() => resolve());
         });
         await probe.sidebar.updateComplete;
-        return {
-          connected: probe.sessions.isConnectionScopeCurrent(probe.scope),
-          loading: probe.sessions.state.loading,
-          revisionAdvanced: probe.sessions.canonicalListRevision !== probe.revision,
-          rowConnected: probe.row.isConnected,
-          rowRemoved: probe.wasRemoved(),
-        };
+        return probe.snapshot();
       });
-      expect(ownerPhase).toEqual({
-        connected: true,
-        loading: true,
-        revisionAdvanced: false,
-        rowConnected: true,
-        rowRemoved: false,
-      });
+      const stableRows = { connected: true, rowConnected: true, rowRemoved: false };
+      expect(inFlight).toEqual({ ...stableRows, loading: true, revisionAdvanced: false });
       expect(
-        (await gateway.getRequests("sessions.list"))
+        (await gateway.getRequests("sessions.list", rosterMatch))
           .slice(before)
-          .map((request) => (request.params as { ownerId?: string }).ownerId ?? null),
-      ).toEqual(["profile-ada", null]);
+          .map((request) => request.params),
+      ).toEqual([
+        expect.objectContaining({ ownerFirst: true, limit: SIDEBAR_SESSION_ROSTER_LIMIT }),
+      ]);
 
-      for (let sample = 0; sample < 6; sample += 1) {
-        expect(await bob.count()).toBe(1);
-        expect(await ada.count()).toBe(1);
-      }
-      await captureSidebar(page, "warm-shared-deferred.png");
+      expect(await bob.count()).toBe(1);
+      expect(await ada.count()).toBe(1);
 
       await gateway.resolveDeferred("sessions.list", sharedRoster);
-      const sharedPhase = await ownerProbe.evaluate(async (probe) => {
+      const completed = await refreshProbe.evaluate(async (probe) => {
         if (probe.sessions.canonicalListRevision === probe.revision) {
           await new Promise<void>((resolve) => {
             const unsubscribe = probe.sessions.subscribe(() => {
@@ -177,27 +138,12 @@ suite.define(() => {
         }
         await probe.sidebar.updateComplete;
         probe.observer.disconnect();
-        return {
-          connected: probe.sessions.isConnectionScopeCurrent(probe.scope),
-          loading: probe.sessions.state.loading,
-          revisionAdvanced: probe.sessions.canonicalListRevision > probe.revision,
-          rowConnected: probe.row.isConnected,
-          rowRemoved: probe.wasRemoved(),
-        };
+        return probe.snapshot(true);
       });
-      expect(sharedPhase).toEqual({
-        connected: true,
-        loading: false,
-        revisionAdvanced: true,
-        rowConnected: true,
-        rowRemoved: false,
-      });
+      expect(completed).toEqual({ ...stableRows, loading: false, revisionAdvanced: true });
       await expect.poll(() => bob.count()).toBe(1);
       expect(await ada.count()).toBe(1);
-      await captureSidebar(page, "warm-after-merge.png");
-      await ownerProbe.dispose();
-    } finally {
-      await context.close();
-    }
-  });
+      await refreshProbe.dispose();
+      await applicationHandle.dispose();
+    }));
 });

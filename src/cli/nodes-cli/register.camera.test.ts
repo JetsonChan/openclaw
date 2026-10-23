@@ -1,10 +1,15 @@
 // Node camera command tests cover help text and RPC handling for optional values.
+import fs from "node:fs/promises";
 import { Command } from "commander";
-import { beforeEach, describe, expect, it, vi } from "vitest";
-import { registerNodesCameraCommands } from "./register.camera.js";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { useAutoCleanupTempDirTracker } from "../../../test/helpers/temp-dir.js";
+import { defaultRuntime } from "../../runtime.js";
+import { writeCameraPayloadToFile } from "../nodes-camera.js";
+import { registerNodesCli } from "./register.js";
 import * as rpc from "./rpc.js";
 
 const capturedInvokeParams: Record<string, unknown>[] = [];
+const cameraOutput = vi.hoisted(() => ({ root: "" }));
 
 vi.mock("./cli-utils.js", async () => {
   const actual = await vi.importActual<typeof import("./cli-utils.js")>("./cli-utils.js");
@@ -18,12 +23,16 @@ vi.mock("../nodes-camera.js", async () => {
   const actual = await vi.importActual<typeof import("../nodes-camera.js")>("../nodes-camera.js");
   return {
     ...actual,
+    // Successful snaps create batch output directories; keep them out of the shared temp root.
+    cameraTempPath: (opts: Parameters<typeof actual.cameraTempPath>[0]) =>
+      actual.cameraTempPath({ ...opts, tmpDir: cameraOutput.root }),
     writeCameraPayloadToFile: vi.fn(async () => {}),
     writeCameraClipPayloadToFile: vi.fn(async () => {}),
   };
 });
 
-vi.mock("../../runtime.js", () => ({
+vi.mock("../../runtime.js", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../../runtime.js")>()),
   defaultRuntime: {
     log: vi.fn(),
     error: vi.fn(),
@@ -41,6 +50,7 @@ vi.mock("./rpc.js", async () => {
       platform: "ios",
       remoteIp: "198.51.100.42",
     })),
+    resolveCliNodeId: vi.fn(async () => "node-abc123"),
     callNodesGatewayCli: vi.fn(async (_method, _opts, invokeParams) => {
       capturedInvokeParams.push(invokeParams as Record<string, unknown>);
       return {
@@ -55,9 +65,13 @@ vi.mock("./rpc.js", async () => {
   };
 });
 
-function buildRootCommand(): Command {
-  const nodes = new Command("nodes");
-  registerNodesCameraCommands(nodes);
+async function buildRootCommand(): Promise<Command> {
+  const program = new Command();
+  await registerNodesCli(program, ["node", "openclaw", "nodes", "camera"]);
+  const nodes = program.commands.find((command) => command.name() === "nodes");
+  if (!nodes) {
+    throw new Error("expected nodes command to be registered");
+  }
   return nodes.exitOverride().configureOutput({ writeErr: () => {}, writeOut: () => {} });
 }
 
@@ -67,30 +81,37 @@ function cameraSnapArgs(extra: string[]): string[] {
 }
 
 describe("nodes camera snap CLI option forwarding", () => {
+  const tempDirs = useAutoCleanupTempDirTracker(afterEach);
+
   beforeEach(() => {
+    cameraOutput.root = tempDirs.make("nodes-camera-cli-");
     capturedInvokeParams.length = 0;
     vi.clearAllMocks();
   });
 
-  it("describes node-owned camera defaults in help", () => {
-    const nodes = buildRootCommand();
-    const camera = nodes.commands.find((command) => command.name() === "camera");
-    const snap = camera?.commands.find((command) => command.name() === "snap");
-    if (!snap) {
-      throw new Error("expected camera snap command");
-    }
+  it.each(["   "])("rejects blank --facing %j before invoking the node", async (facing) => {
+    const nodes = await buildRootCommand();
+    await expect(
+      nodes.parseAsync(cameraSnapArgs(["--node", "test-node", "--facing", facing])),
+    ).rejects.toThrow(/invalid facing/i);
+    expect(rpc.resolveCliNode).not.toHaveBeenCalled();
+    expect(rpc.callNodesGatewayCli).not.toHaveBeenCalled();
+  });
 
-    expect(snap.options.find((option) => option.long === "--facing")?.defaultValue).toBeUndefined();
-    expect(snap.options.find((option) => option.long === "--quality")?.description).toBe(
-      "JPEG quality (optional; platform-specific default)",
-    );
-    expect(snap.options.find((option) => option.long === "--delay-ms")?.description).toBe(
-      "Delay before capture in ms (optional; platform-specific default)",
+  it.each([
+    { facing: "both", expected: ["front", "back"] },
+    { facing: " FRONT ", expected: ["front"] },
+  ])("forwards normalized --facing $facing", async ({ facing, expected }) => {
+    await (
+      await buildRootCommand()
+    ).parseAsync(cameraSnapArgs(["--node", "test-node", "--facing", facing]));
+    expect(capturedInvokeParams.map((invoke) => invoke.params)).toEqual(
+      expected.map((value) => expect.objectContaining({ facing: value })),
     );
   });
 
   it("makes one facing-less request and forwards deviceId when --facing is omitted", async () => {
-    const nodes = buildRootCommand();
+    const nodes = await buildRootCommand();
     await nodes.parseAsync(cameraSnapArgs(["--node", "test-node", "--device-id", "camera-device"]));
 
     expect(rpc.callNodesGatewayCli).toHaveBeenCalledTimes(1);
@@ -107,7 +128,7 @@ describe("nodes camera snap CLI option forwarding", () => {
   });
 
   it("forwards explicit --quality and --delay-ms values in RPC params", async () => {
-    const nodes = buildRootCommand();
+    const nodes = await buildRootCommand();
     await nodes.parseAsync(
       cameraSnapArgs(["--node", "test-node", "--quality", "0.7", "--delay-ms", "500"]),
     );
@@ -121,17 +142,92 @@ describe("nodes camera snap CLI option forwarding", () => {
     expect(forwardedParams.delayMs).toBe(500);
   });
 
+  it.each([
+    {
+      name: "malformed image data",
+      payload: { format: "jpg", base64: "not-base64!", width: 1, height: 1 },
+    },
+    {
+      name: "an unsafe image extension",
+      payload: { format: "../evil", base64: "aGk=", width: 1, height: 1 },
+    },
+  ])(
+    "does not publish the front camera when the back camera returns $name",
+    async ({ payload }) => {
+      vi.mocked(rpc.callNodesGatewayCli)
+        .mockResolvedValueOnce({
+          payload: { format: "jpg", base64: "aGk=", width: 1, height: 1 },
+        })
+        .mockResolvedValueOnce({ payload });
+      const actualCamera =
+        await vi.importActual<typeof import("../nodes-camera.js")>("../nodes-camera.js");
+      const writer = vi.mocked(writeCameraPayloadToFile);
+      writer.mockImplementation(actualCamera.writeCameraPayloadToFile);
+      const rename = vi.spyOn(fs, "rename");
+
+      try {
+        await expect(
+          (await buildRootCommand()).parseAsync(
+            cameraSnapArgs(["--node", "test-node", "--facing", "both"]),
+          ),
+        ).rejects.toThrow(/invalid base64|invalid media format/i);
+        expect(rename).not.toHaveBeenCalled();
+        expect(writer).not.toHaveBeenCalled();
+      } finally {
+        const publishedPaths = rename.mock.calls.map(([, destination]) => String(destination));
+        rename.mockRestore();
+        writer.mockImplementation(async () => {});
+        await Promise.all(
+          publishedPaths.map(async (filePath) => fs.unlink(filePath).catch(() => {})),
+        );
+      }
+    },
+  );
+
+  it("does not activate the back camera after the front returns an unsafe extension", async () => {
+    vi.mocked(rpc.callNodesGatewayCli).mockResolvedValueOnce({
+      payload: { format: "../evil", base64: "aGk=", width: 1, height: 1 },
+    });
+
+    await expect(
+      (await buildRootCommand()).parseAsync(
+        cameraSnapArgs(["--node", "test-node", "--facing", "both"]),
+      ),
+    ).rejects.toThrow(/invalid media format/i);
+    expect(rpc.callNodesGatewayCli).toHaveBeenCalledTimes(1);
+    expect(writeCameraPayloadToFile).not.toHaveBeenCalled();
+  });
+
   it("rejects out-of-range --quality", async () => {
-    const nodes = buildRootCommand();
+    const nodes = await buildRootCommand();
     await expect(
       nodes.parseAsync(cameraSnapArgs(["--node", "test-node", "--quality", "1.5"])),
     ).rejects.toThrow("--quality must be at most 1");
   });
 
   it("rejects negative --delay-ms", async () => {
-    const nodes = buildRootCommand();
+    const nodes = await buildRootCommand();
     await expect(
       nodes.parseAsync(cameraSnapArgs(["--node", "test-node", "--delay-ms", "-1"])),
     ).rejects.toThrow("--delay-ms must be a non-negative integer");
+  });
+
+  it("strips node-reported control characters from the camera list table", async () => {
+    vi.mocked(rpc.callNodesGatewayCli).mockResolvedValueOnce({
+      payload: {
+        devices: [
+          { name: "front\u0007cam", position: "\u001b[2Jback", id: "dev\u001b]0;x\u0007-1" },
+        ],
+      },
+    });
+
+    await (
+      await buildRootCommand()
+    ).parseAsync(["node", "nodes", "camera", "list", "--node", "test-node"]);
+
+    const output = vi.mocked(defaultRuntime.log).mock.calls.join("\n");
+    expect(output).not.toContain("\u001b");
+    expect(output).not.toContain("\u0007");
+    expect(output).toMatch(/frontcam\s.*back\s.*dev-1/u);
   });
 });

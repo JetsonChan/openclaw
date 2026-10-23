@@ -1,9 +1,16 @@
 import { expect, it } from "vitest";
+import { evaluateControlUiContext } from "../test-helpers/control-ui-e2e-context.ts";
+import { waitForControlUiGatewayReady } from "../test-helpers/control-ui-e2e-readiness.ts";
 import {
   defaultControlUiFeatureMethods,
   installMockGateway,
 } from "../test-helpers/control-ui-e2e.ts";
 import { createControlUiE2eSuite } from "./control-ui-e2e-suite.test-support.ts";
+import {
+  expectRequestCount,
+  nativeAuth,
+  terminalSession,
+} from "./workspace-terminal.test-support.ts";
 
 const suite = createControlUiE2eSuite({
   name: "embedded terminal document",
@@ -12,10 +19,71 @@ const suite = createControlUiE2eSuite({
     `Playwright Chromium is not installed or cannot start at ${executablePath}. Run \`pnpm --dir ui exec playwright install --with-deps chromium\`, or set OPENCLAW_UI_E2E_ALLOW_MISSING_CHROMIUM=1 only when intentionally skipping this lane.`,
 });
 
-const deadSessionScreenshotPath = process.env.OPENCLAW_TERMINAL_DEAD_SESSION_SCREENSHOT?.trim();
-const deadSessionVideoDir = process.env.OPENCLAW_TERMINAL_DEAD_SESSION_VIDEO_DIR?.trim();
-
 suite.define(() => {
+  it.each(["chat", "focus/terminal"])("routes focused terminal keys in %s", async (route) => {
+    await suite.withPage({ serviceWorkers: "block" }, async ({ page }) => {
+      const gateway = await installMockGateway(page, {
+        terminalEnabled: true,
+        featureMethods: [...defaultControlUiFeatureMethods, "terminal.open"],
+        methodResponses: {
+          "terminal.list": {
+            sessions: [
+              { ...terminalSession("keyboard-terminal", { shell: "/bin/sh" }), attached: true },
+            ],
+          },
+          "terminal.open": terminalSession("keyboard-terminal", { shell: "/bin/sh" }),
+          "terminal.attach": {
+            cases: [
+              {
+                match: { sessionId: "keyboard-terminal" },
+                response: {
+                  ...terminalSession("keyboard-terminal", { shell: "/bin/sh" }),
+                  buffer: "",
+                  seq: 0,
+                },
+              },
+            ],
+          },
+        },
+      });
+      await page.goto(`${suite.server.baseUrl}${route}`);
+      await waitForControlUiGatewayReady(page);
+      if (route === "chat") {
+        await page.locator(".agent-chat__composer-combobox textarea").waitFor();
+        await page.keyboard.press("Control+Backquote");
+      }
+      const panel = page
+        .locator("openclaw-terminal-panel")
+        .filter({ has: page.locator(".tp-host") });
+      const terminal = panel.locator(".tp-host");
+      if (route === "chat") {
+        await panel.locator(".tp-session.is-current").click();
+      }
+      await terminal.locator("canvas").waitFor();
+      await terminal.click();
+      await page.keyboard.type("x");
+      await gateway.waitForRequest("terminal.input");
+      const before = await gateway.getRequests("terminal.input");
+      await page.keyboard.press("Control+Backquote");
+      if (route === "chat") {
+        const tabLabel = page
+          .locator('[data-region-header="side"] .tabstrip-tab__label')
+          .filter({ hasText: "sh" });
+        await tabLabel.waitFor({ state: "hidden" });
+        expect(await gateway.getRequests("terminal.input")).toEqual(before);
+        await page.keyboard.press("Control+Backquote");
+        await panel.locator(".tp-session.is-current").click();
+        await tabLabel.waitFor();
+      } else {
+        await expect
+          .poll(async () => (await gateway.getRequests("terminal.input")).length)
+          .toBe(before.length + 1);
+        expect(await panel.locator(".tp-header").isVisible()).toBe(true);
+        expect(await page.locator("openclaw-app-shell").count()).toBe(0);
+      }
+    });
+  });
+
   it("returns from an unavailable focused terminal", async () => {
     await suite.withPage({ serviceWorkers: "block" }, async ({ page }) => {
       await installMockGateway(page);
@@ -40,19 +108,12 @@ suite.define(() => {
   it("fences an SW-less stale build before it can restore an ownerless terminal", async () => {
     await suite.withPage({ serviceWorkers: "block" }, async ({ page }) => {
       const gatewayUrl = suite.server.baseUrl.replace(/^http/u, "ws");
-      await page.addInitScript((url) => {
-        (
-          window as Window & {
-            ["__OPENCLAW_NATIVE_CONTROL_AUTH__"]?: { gatewayUrl: string; token: string };
-          }
-        )["__OPENCLAW_NATIVE_CONTROL_AUTH__"] = {
-          gatewayUrl: url,
-          token: "native-build-identity-token",
-        };
-      }, gatewayUrl);
+      await nativeAuth(page, "native-build-identity-token", gatewayUrl);
       const gateway = await installMockGateway(page, {
         featureMethods: [...defaultControlUiFeatureMethods, "terminal.open"],
         serverBuildId: "replacement-build",
+        // This build-admission fence intentionally prevents initial roster hydration.
+        awaitInitialRoster: false,
         terminalEnabled: true,
       });
 
@@ -61,8 +122,8 @@ suite.define(() => {
       expect(firstConnect.params).toMatchObject({ client: { buildId: "e2e" } });
       await page.waitForFunction(
         () =>
-          sessionStorage.getItem("openclaw.controlUi.staleChunkReloadBuildId") ===
-          "replacement-build",
+          JSON.parse(sessionStorage.getItem("openclaw.controlUi.staleChunkReloadBuildId") ?? "null")
+            ?.buildId === "replacement-build",
       );
       await page.getByText("Server updated", { exact: true }).waitFor();
 
@@ -78,28 +139,13 @@ suite.define(() => {
   it("keeps an independently built same-origin Control UI connected", async () => {
     await suite.withPage({ serviceWorkers: "block" }, async ({ page }) => {
       const gatewayUrl = suite.server.baseUrl.replace(/^http/u, "ws");
-      await page.addInitScript((url) => {
-        (
-          window as Window & {
-            ["__OPENCLAW_NATIVE_CONTROL_AUTH__"]?: { gatewayUrl: string; token: string };
-          }
-        )["__OPENCLAW_NATIVE_CONTROL_AUTH__"] = {
-          gatewayUrl: url,
-          token: "native-configured-ui-token",
-        };
-      }, gatewayUrl);
+      await nativeAuth(page, "native-configured-ui-token", gatewayUrl);
       const gateway = await installMockGateway(page, {
         assistantAgentId: "main",
         controlUiBuildSource: "configured",
         featureMethods: [...defaultControlUiFeatureMethods, "terminal.open"],
         methodResponses: {
-          "terminal.open": {
-            agentId: "main",
-            confined: false,
-            cwd: "/workspace",
-            sessionId: "configured-ui-terminal",
-            shell: "/bin/bash",
-          },
+          "terminal.open": terminalSession("configured-ui-terminal"),
         },
         serverBuildId: "independent-build",
         serverVersion: "2026.7.20",
@@ -148,59 +194,27 @@ suite.define(() => {
             mainKey: "main",
             scope: "agent",
           },
-          // The startup projection owns the roster when chat.startup is
-          // advertised, so the second agent must arrive through it.
-          "chat.startup": {
-            agentsList: {
-              agents: [
-                { id: "main", identity: { name: "Main" }, name: "Main" },
-                { id: "research", identity: { name: "Research" }, name: "Research" },
-              ],
-              defaultId: "main",
-              mainKey: "main",
-              scope: "agent",
-            },
-            messages: [],
-            sessionId: "terminal-selection-e2e-session",
-          },
-          "terminal.open": {
+          "terminal.open": terminalSession("terminal-selection-e2e", {
             agentId: "research",
-            confined: false,
             cwd: "/workspace/research",
-            sessionId: "terminal-selection-e2e",
-            shell: "/bin/bash",
-          },
+          }),
         },
         terminalEnabled: true,
       });
 
-      expect((await page.goto(`${suite.server.baseUrl}chat`))?.status()).toBe(200);
+      // Global selection owns standalone docks; Chat terminals belong to their
+      // conversation regardless of a later global agent selection.
+      expect((await page.goto(`${suite.server.baseUrl}new`))?.status()).toBe(200);
       await gateway.waitForRequest("connect");
-      await gateway.waitForRequest("chat.startup");
+      await page.locator(".new-session-page__message").waitFor();
       await page.waitForFunction(() => {
         const panel = document.querySelector("openclaw-terminal-panel") as
           | (HTMLElement & { available: boolean })
           | null;
-        const shell = document.querySelector("openclaw-app-shell") as
-          | (HTMLElement & {
-              runtime?: { context?: { agentSelection?: { set: (agentId: string) => void } } };
-            })
-          | null;
-        return (
-          customElements.get("openclaw-terminal-panel") !== undefined &&
-          panel?.available &&
-          typeof shell?.runtime?.context?.agentSelection?.set === "function"
-        );
+        return panel?.available === true;
       });
-      await page.evaluate(() => {
-        const shell = document.querySelector("openclaw-app-shell") as HTMLElement & {
-          runtime?: { context?: { agentSelection?: { set: (agentId: string) => void } } };
-        };
-        const setAgent = shell.runtime?.context?.agentSelection?.set;
-        if (!setAgent) {
-          throw new Error("Agent selection is not ready");
-        }
-        setAgent("research");
+      await evaluateControlUiContext(page, (context) => {
+        context.agentSelection.set("research");
         window.dispatchEvent(
           new CustomEvent("openclaw:terminal-toggle", {
             detail: { agentId: "research", open: true },
@@ -215,31 +229,13 @@ suite.define(() => {
 
   it("renders only the terminal with a tab-attached close control while native auth connects", async () => {
     await suite.withPage({ serviceWorkers: "block" }, async ({ page }) => {
-      await page.addInitScript(() => {
-        (
-          window as Window & {
-            ["__OPENCLAW_NATIVE_CONTROL_AUTH__"]?: {
-              gatewayUrl: string;
-              token: string;
-            };
-          }
-        )["__OPENCLAW_NATIVE_CONTROL_AUTH__"] = {
-          gatewayUrl: "ws://gateway.example.test",
-          token: "native-terminal-token",
-        };
-      });
+      await nativeAuth(page, "native-terminal-token");
       const gateway = await installMockGateway(page, {
         deferredMethods: ["connect"],
         featureMethods: [...defaultControlUiFeatureMethods, "terminal.open"],
         methodResponses: {
           "terminal.list": { sessions: [] },
-          "terminal.open": {
-            agentId: "main",
-            confined: false,
-            cwd: "/workspace",
-            sessionId: "terminal-e2e",
-            shell: "/bin/bash",
-          },
+          "terminal.open": terminalSession("terminal-e2e"),
         },
         terminalEnabled: true,
       });
@@ -264,7 +260,7 @@ suite.define(() => {
         seq: colorQueries.length,
         data: colorQueries,
       });
-      await expect.poll(async () => (await gateway.getRequests("terminal.input")).length).toBe(3);
+      await expectRequestCount(gateway, "terminal.input", 3);
       const themeColors = await page.evaluate(() => {
         const styles = getComputedStyle(document.documentElement);
         return ["--text", "--bg", "--accent"].map((property) =>
@@ -287,18 +283,17 @@ suite.define(() => {
         .evaluate((close) => {
           const header = close.closest<HTMLElement>(".tp-header");
           const tab = close.previousElementSibling;
-          const tabBase = tab?.shadowRoot?.querySelector<HTMLElement>("[part~='base']");
           if (!header) {
             throw new Error("Terminal close control must stay inside the tab header");
           }
-          if (!tabBase) {
+          if (!(tab instanceof HTMLElement) || !tab.matches('[role="tab"]')) {
             throw new Error("Terminal close control must follow a rendered tab surface");
           }
           const headerBounds = header.getBoundingClientRect();
           const closeBounds = close.getBoundingClientRect();
-          const tabBounds = tabBase.getBoundingClientRect();
+          const tabBounds = tab.getBoundingClientRect();
           const closeStyle = getComputedStyle(close);
-          const tabStyle = getComputedStyle(tabBase);
+          const tabStyle = getComputedStyle(tab);
           return {
             backgroundColor: tabStyle.backgroundColor,
             borderBottomWidth: tabStyle.borderBottomWidth,
@@ -320,7 +315,7 @@ suite.define(() => {
       expect(closeControlMetrics.borderRadius).not.toBe("0px");
       expect(closeControlMetrics.closeBorderBottomWidth).toBe("0px");
       expect(closeControlMetrics.closeInset).toBeGreaterThanOrEqual(-0.5);
-      expect(closeControlMetrics.tabHeight).toBe(30);
+      expect(closeControlMetrics.tabHeight).toBe(28);
       expect(closeControlMetrics.width).toBe(28);
       expect(closeControlMetrics.height).toBe(28);
       expect(closeControlMetrics.centerOffset).toBeLessThanOrEqual(0.5);
@@ -337,23 +332,10 @@ suite.define(() => {
       {
         serviceWorkers: "block",
         viewport: { width: 1280, height: 800 },
-        ...(deadSessionVideoDir
-          ? { recordVideo: { dir: deadSessionVideoDir, size: { width: 1280, height: 800 } } }
-          : {}),
       },
       async ({ page }) => {
+        await nativeAuth(page);
         await page.addInitScript(() => {
-          (
-            window as Window & {
-              ["__OPENCLAW_NATIVE_CONTROL_AUTH__"]?: {
-                gatewayUrl: string;
-                token: string;
-              };
-            }
-          )["__OPENCLAW_NATIVE_CONTROL_AUTH__"] = {
-            gatewayUrl: "ws://gateway.example.test",
-            token: "test",
-          };
           window.sessionStorage.setItem(
             "openclaw.terminal.sessions.v1",
             JSON.stringify(["terminal-dead-after-restart"]),
@@ -364,13 +346,7 @@ suite.define(() => {
           featureMethods: [...defaultControlUiFeatureMethods, "terminal.open"],
           methodResponses: {
             "terminal.list": { sessions: [] },
-            "terminal.open": {
-              agentId: "main",
-              confined: false,
-              cwd: "/workspace",
-              sessionId: "replacement-terminal",
-              shell: "/bin/bash",
-            },
+            "terminal.open": terminalSession("replacement-terminal"),
           },
           terminalEnabled: true,
         });
@@ -380,15 +356,11 @@ suite.define(() => {
         await gateway.waitForRequest("connect");
         await gateway.resolveDeferred("connect");
         await gateway.waitForRequest("terminal.list");
-        await page.waitForTimeout(250);
-
-        if (deadSessionScreenshotPath) {
-          await page.screenshot({ path: deadSessionScreenshotPath, fullPage: true });
-        }
         const status = page.locator("openclaw-terminal-panel .tabstrip-tab__status");
         await expect
           .poll(async () => await status.textContent(), { timeout: 5_000 })
           .toBe("exited");
+
         expect(await gateway.getRequests("terminal.attach")).toHaveLength(0);
         expect(await gateway.getRequests("terminal.open")).toHaveLength(0);
         expect(

@@ -1,10 +1,12 @@
 import { randomBytes } from "node:crypto";
+import { setTimeout as sleep } from "node:timers/promises";
 import type {
   GatewaySuspendPrepareResult,
   GatewaySuspendResumeResult,
 } from "../../../packages/gateway-protocol/src/index.js";
 import { colorize, isRich, theme } from "../../../packages/terminal-core/src/theme.js";
 import type { OutputRuntimeEnv } from "../../runtime.js";
+import { formatCliCommand } from "../command-format.js";
 import type { callGatewayFromCliWithTransport } from "../gateway-rpc.js";
 
 type SuspendRpcOpts = Parameters<typeof callGatewayFromCliWithTransport>[1];
@@ -14,8 +16,6 @@ type SuspendRpcCall = (method: string, opts: SuspendRpcOpts, params?: unknown) =
 type SuspendCliDeps = {
   callGateway: SuspendRpcCall;
   runtime: OutputRuntimeEnv;
-  nowMs?: () => number;
-  sleep?: (delayMs: number) => Promise<void>;
 };
 
 const MIN_SUSPEND_POLL_DELAY_MS = 50;
@@ -24,7 +24,7 @@ function parseWaitMs(value: string | number | undefined): number | undefined {
   if (value === undefined) {
     return undefined;
   }
-  const seconds = typeof value === "number" ? value : Number(value.trim());
+  const seconds = typeof value === "number" ? value : Number(value.trim() || Number.NaN);
   if (!Number.isFinite(seconds) || seconds < 0) {
     throw new Error("--wait must be a non-negative number of seconds");
   }
@@ -56,14 +56,6 @@ function formatBusyResult(
   ].join("\n");
 }
 
-function writeSuspendJson(
-  runtime: OutputRuntimeEnv,
-  result: GatewaySuspendPrepareResult,
-  requestId: string,
-): void {
-  runtime.writeJson({ ...result, requestId });
-}
-
 export async function runGatewaySuspend(
   options: {
     rpcOpts: SuspendRpcOpts;
@@ -73,23 +65,16 @@ export async function runGatewaySuspend(
   },
   deps: SuspendCliDeps,
 ): Promise<void> {
-  const nowMs = deps.nowMs ?? Date.now;
-  const sleep =
-    deps.sleep ??
-    (async (delayMs: number) =>
-      await new Promise<void>((resolve) => {
-        setTimeout(resolve, delayMs);
-      }));
   const requestId = resolveRequestId(options.requestId);
   const waitMs = parseWaitMs(options.waitSeconds);
-  const deadlineMs = waitMs === undefined ? undefined : nowMs() + waitMs;
+  const deadlineMs = waitMs === undefined ? undefined : Date.now() + waitMs;
   const maxAttempts = waitMs === undefined ? 1 : Math.ceil(waitMs / MIN_SUSPEND_POLL_DELAY_MS) + 1;
   let latest: GatewaySuspendPrepareResult | undefined;
 
   for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
     // A sleep can overshoot the deadline; never issue a prepare that could
     // suspend the Gateway after the operator's advertised --wait window.
-    if (attempt > 0 && deadlineMs !== undefined && nowMs() >= deadlineMs) {
+    if (attempt > 0 && deadlineMs !== undefined && Date.now() >= deadlineMs) {
       break;
     }
     latest = (await deps.callGateway("gateway.suspend.prepare", options.rpcOpts, {
@@ -97,7 +82,7 @@ export async function runGatewaySuspend(
     })) as GatewaySuspendPrepareResult;
     if (latest.status === "ready") {
       if (options.json) {
-        writeSuspendJson(deps.runtime, latest, requestId);
+        deps.runtime.writeJson({ ...latest, requestId });
         return;
       }
       const rich = isRich();
@@ -106,20 +91,22 @@ export async function runGatewaySuspend(
       deps.runtime.log(
         `${colorize(rich, theme.muted, "Expires:")} ${new Date(latest.expiresAtMs).toISOString()} (${latest.expiresAtMs} ms)`,
       );
-      deps.runtime.log(`Resume with: openclaw gateway resume ${latest.suspensionId}`);
+      const port = options.rpcOpts.localPortOverride;
+      const command = `openclaw gateway resume ${latest.suspensionId}`;
+      deps.runtime.log(
+        `Resume with: ${formatCliCommand(port === undefined ? command : `${command} --port ${port}`)}`,
+      );
       return;
+    }
+    if (latest.status === "draining") {
+      throw new Error("Gateway suspension unexpectedly entered drain mode");
     }
 
     if (deadlineMs === undefined) {
-      if (options.json) {
-        writeSuspendJson(deps.runtime, latest, requestId);
-        deps.runtime.exit(1);
-        return;
-      }
-      throw new Error(`${formatBusyResult(latest)}\nRetry later or use --wait <seconds>.`);
+      break;
     }
 
-    const remainingMs = deadlineMs - nowMs();
+    const remainingMs = deadlineMs - Date.now();
     if (remainingMs <= 0) {
       break;
     }
@@ -131,16 +118,20 @@ export async function runGatewaySuspend(
     throw new Error("Gateway suspension polling ended without a result");
   }
   if (options.json) {
-    writeSuspendJson(deps.runtime, latest, requestId);
+    deps.runtime.writeJson({ ...latest, requestId });
     deps.runtime.exit(1);
     return;
   }
-  throw new Error(`${formatBusyResult(latest)}\nTimed out waiting for the Gateway to become idle.`);
+  const hint =
+    deadlineMs === undefined
+      ? "Retry later or use --wait <seconds>."
+      : "Timed out waiting for the Gateway to become idle.";
+  throw new Error(`${formatBusyResult(latest)}\n${hint}`);
 }
 
 export async function runGatewayResume(
   options: { rpcOpts: SuspendRpcOpts; suspensionId: string; json?: boolean },
-  deps: Pick<SuspendCliDeps, "callGateway" | "runtime">,
+  deps: SuspendCliDeps,
 ): Promise<void> {
   const result = (await deps.callGateway("gateway.suspend.resume", options.rpcOpts, {
     suspensionId: options.suspensionId,

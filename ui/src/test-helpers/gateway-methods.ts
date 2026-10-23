@@ -7,6 +7,7 @@ export const SESSION_MUTATION_TEST_METHODS = [
   "projects.add",
   "session.members.add",
   "session.members.list",
+  "session.members.listEvidence",
   "session.members.remove",
   "session.visibility.set",
   "sessions.assignOwner",
@@ -14,8 +15,6 @@ export const SESSION_MUTATION_TEST_METHODS = [
   "sessions.branches.switch",
   "sessions.catalog.startTerminal",
   "sessions.compact",
-  "sessions.compaction.branch",
-  "sessions.compaction.restore",
   "sessions.create",
   "sessions.delete",
   "sessions.dispatch",
@@ -51,4 +50,12 @@ export function sessionMutationGatewayHello(
   scopes: readonly string[] = ["operator.admin"],
 ): GatewayHelloOk {
   return gatewayHelloForMethods(SESSION_MUTATION_TEST_METHODS, scopes);
+}
+
+export function sidebarGatewayHello(): GatewayHelloOk {
+  return gatewayHelloForMethods([
+    ...SESSION_MUTATION_TEST_METHODS,
+    "agents.create",
+    "openclaw.chat",
+  ]);
 }

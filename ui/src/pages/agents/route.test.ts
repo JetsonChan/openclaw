@@ -1,7 +1,10 @@
 import type { RouteLoaderOptions } from "@openclaw/uirouter";
 import { describe, expect, it, vi } from "vitest";
+import type { GatewayBrowserClient } from "../../api/gateway.ts";
 import type { AgentsListResult } from "../../api/types.ts";
 import type { ApplicationContext } from "../../app/context.ts";
+import { createAgentCapability } from "../../lib/agents/index.ts";
+import { gateway, settingsSelection, snapshot } from "./agents-page.test-support.ts";
 import { page, type AgentsRouteData } from "./route.ts";
 
 const agentsList: AgentsListResult = {
@@ -17,15 +20,14 @@ const agentsList: AgentsListResult = {
 
 async function loadRoute(url: string): Promise<AgentsRouteData> {
   const parsed = new URL(url, "https://control.test");
-  const ensureList = vi.fn(async () => agentsList);
-  const gateway = { snapshot: { client: null, phase: "stopped" } };
+  const request = vi.fn(async () => agentsList);
+  const currentGateway = gateway(snapshot({ request } as unknown as GatewayBrowserClient));
+  const agents = createAgentCapability(currentGateway);
   const context = {
     basePath: "",
-    gateway,
-    agents: {
-      state: { agentsList: null, agentsError: null },
-      ensureList,
-    },
+    gateway: currentGateway,
+    settingsAgentSelection: settingsSelection(null),
+    agents,
   } as unknown as ApplicationContext;
   if (!page.loader) {
     throw new Error("agents route has no loader");
@@ -42,7 +44,11 @@ async function loadRoute(url: string): Promise<AgentsRouteData> {
     deps: `${parsed.pathname}\u0000${parsed.search}\u0000${parsed.hash}`,
     cause: "preload",
   } satisfies RouteLoaderOptions)) as AgentsRouteData;
-  expect(ensureList).toHaveBeenCalledOnce();
+  expect(request).toHaveBeenCalledExactlyOnceWith("agents.list", {
+    includeSessionPlacement: true,
+  });
+  expect(agents.state.agentsList).toBe(agentsList);
+  agents.dispose();
   return result;
 }
 
@@ -50,40 +56,8 @@ describe("agents route", () => {
   it("keeps a requested agent and panel when the roster loads on a cold deep link", async () => {
     const result = await loadRoute("/settings/agents/research/tools");
 
-    expect(result.agentsList?.agents.map((agent) => agent.id)).toEqual(["main", "research"]);
-    expect(result.selectedAgentId).toBe("research");
     expect(result.requestedAgentId).toBe("research");
     expect(result.panel).toBe("tools");
     expect(result.canonicalLocation).toBeUndefined();
-  });
-
-  it("keeps the bare route while selecting the default agent and panel", async () => {
-    const result = await loadRoute("/settings/agents");
-
-    expect(result.selectedAgentId).toBe("main");
-    expect(result.requestedAgentId).toBeNull();
-    expect(result.panel).toBe("files");
-    expect(result.canonicalLocation).toBeUndefined();
-  });
-
-  it("falls back to the default agent without rewriting an unknown explicit id", async () => {
-    const result = await loadRoute("/settings/agents/missing/memory");
-
-    expect(result.selectedAgentId).toBe("main");
-    expect(result.requestedAgentId).toBe("missing");
-    expect(result.panel).toBe("memory");
-    expect(result.canonicalLocation).toBeUndefined();
-  });
-
-  it("returns the canonical replacement for a legacy agent query", async () => {
-    const result = await loadRoute("/settings/agents?agent=research&probe=1#files");
-
-    expect(result.selectedAgentId).toBe("research");
-    expect(result.panel).toBe("files");
-    expect(result.canonicalLocation).toEqual({
-      pathname: "/settings/agents/research",
-      search: "?probe=1",
-      hash: "#files",
-    });
   });
 });

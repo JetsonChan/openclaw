@@ -1,7 +1,7 @@
 // Verifies model catalog lookup scope for custom and manifest-owned models.
 import { describe, expect, it } from "vitest";
 import type { OpenClawConfig } from "../config/types.openclaw.js";
-import { resolveModelCatalogScope } from "./model-discovery-context.js";
+import { resolveModelCatalogScope } from "../plugins/provider-config-owner.js";
 
 describe("resolveModelCatalogScope", () => {
   it("keeps explicit custom provider models scoped to that provider", () => {
@@ -34,7 +34,7 @@ describe("resolveModelCatalogScope", () => {
         cfg,
         provider: "tui-pty-mock",
         model: "gpt-5.5",
-      }).modelRefs,
+      }),
     ).toEqual(["tui-pty-mock/gpt-5.5"]);
   });
 
@@ -44,7 +44,7 @@ describe("resolveModelCatalogScope", () => {
         cfg: {},
         provider: "openai",
         model: "gpt-5.4",
-      }).modelRefs,
+      }),
     ).toEqual(["openai/gpt-5.4", "gpt-5.4"]);
   });
 });

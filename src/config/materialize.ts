@@ -1,19 +1,17 @@
-// Materializes normalized config into runtime-ready settings.
 import type { PluginManifestRegistry } from "../plugins/manifest-registry.js";
+import { attachAgentListProjection } from "./agent-list-projection.js";
 import {
   applyCompactionDefaults,
   applyContextPruningDefaults,
   applyAgentDefaults,
-  applyCronDefaults,
-  applyLoggingDefaults,
   applyMessageDefaults,
   applyModelDefaults,
   applySessionDefaults,
-  applyTalkConfigNormalization,
 } from "./defaults.js";
-import { inheritLegacyDefaultAgentId } from "./legacy.default-agent-owner.js";
 import { normalizeExecSafeBinProfilesInConfig } from "./normalize-exec-safe-bin.js";
 import { normalizeConfigPaths } from "./normalize-paths.js";
+import { captureConfigResolutionFactsThroughRewrite } from "./resolution-facts.js";
+import { normalizeTalkConfig } from "./talk.js";
 import type { OpenClawConfig, ResolvedSourceConfig, RuntimeConfig } from "./types.js";
 
 // Snapshot and load must materialize identically: prepared-runtime exact-config
@@ -31,23 +29,25 @@ export function asRuntimeConfig(config: OpenClawConfig): RuntimeConfig {
 export function materializeRuntimeConfig(
   config: OpenClawConfig,
   options: {
+    env?: NodeJS.ProcessEnv;
+    homedir?: () => string;
     manifestRegistry?: Pick<PluginManifestRegistry, "plugins">;
     loadManifestRegistry?: () => Pick<PluginManifestRegistry, "plugins"> | undefined;
   } = {},
 ): RuntimeConfig {
+  const carryResolutionFacts = captureConfigResolutionFactsThroughRewrite(config);
   let next = applyMessageDefaults(config);
-  next = applyLoggingDefaults(next);
   next = applySessionDefaults(next);
   next = applyAgentDefaults(next);
-  next = applyCronDefaults(next);
-  next = applyContextPruningDefaults(next, { manifestRegistry: options.manifestRegistry });
+  next = applyContextPruningDefaults(next, options);
   next = applyCompactionDefaults(next);
   next = applyModelDefaults(next, {
     manifestRegistry: options.manifestRegistry,
     loadManifestRegistry: options.loadManifestRegistry,
   });
-  next = applyTalkConfigNormalization(next);
-  normalizeConfigPaths(next);
+  next = normalizeTalkConfig(next);
+  normalizeConfigPaths(next, options);
   normalizeExecSafeBinProfilesInConfig(next);
-  return asRuntimeConfig(inheritLegacyDefaultAgentId(config, next));
+  carryResolutionFacts(next);
+  return asRuntimeConfig(next.agents?.entries ? attachAgentListProjection(next) : next);
 }
