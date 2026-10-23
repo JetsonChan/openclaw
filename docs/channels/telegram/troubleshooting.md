@@ -46,6 +46,20 @@ Symptom-first checks for a Telegram bot that is not behaving.
 
   </Accordion>
 
+  <Accordion title="Messages fail with runtime owner was not published">
+
+    OpenClaw tries to rebuild an agent's failed model runtime when the next
+    message arrives. If publication still fails, the inbound message gets one
+    retry, then remains in the failed ingress queue with the reason
+    `runtime-recovery-failed`. Typing stops instead of being restarted by
+    repeated replay. Ordinary network failures keep their normal retry policy.
+
+    Check `openclaw logs --follow` for the underlying publication error, correct
+    the reported model or plugin problem, and resend the message. The failed
+    queue entry retains the original input for operator inspection.
+
+  </Accordion>
+
   <Accordion title="A final reply fails during a network interruption">
 
     OpenClaw retries an ordinary text or rich-text final reply once after an

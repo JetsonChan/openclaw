@@ -4,7 +4,10 @@ import { createDeferredCore } from "../shared/deferred.js";
 import { resolvePublishedModelCatalogOwner } from "./prepared-model-catalog-owner.js";
 import { assertPreparedModelRuntimeAdmissionCanWait } from "./prepared-model-runtime-admission.js";
 import { readCapturedPreparedModelRuntimeCatalog } from "./prepared-model-runtime.capture.js";
-import { PreparedModelRuntimeOwnerNotPublishedError } from "./prepared-model-runtime.errors.js";
+import {
+  PreparedModelRuntimeOwnerNotPublishedError,
+  PreparedModelRuntimePublicationSupersededError,
+} from "./prepared-model-runtime.errors.js";
 import type {
   PreparedModelRuntimeLease,
   PreparedModelRuntimeOwner,
@@ -13,6 +16,10 @@ import type {
 } from "./prepared-model-runtime.types.js";
 
 const EMPTY_REPLY_DISPATCH_PUBLICATION: readonly PreparedReplyDispatchRuntime[] = Object.freeze([]);
+
+class PreparedModelRuntimeRecoveryError extends PreparedModelRuntimeOwnerNotPublishedError {
+  readonly code = "PREPARED_MODEL_RUNTIME_RECOVERY_FAILED";
+}
 
 function buildReplyDispatchPublication(
   owners: Iterable<PreparedModelRuntimeOwner>,
@@ -154,7 +161,21 @@ export class PreparedReplyDispatchPublicationOwner {
         assertPreparedModelRuntimeAdmissionCanWait(pendingOwner);
       }
       if (!demandPrepared) {
-        await this.host.ensureReady(params);
+        try {
+          await this.host.ensureReady(params);
+        } catch (error) {
+          if (
+            abortSignal?.aborted ||
+            !pendingOwner?.catalogRecovery ||
+            error instanceof PreparedModelRuntimePublicationSupersededError
+          ) {
+            throw error;
+          }
+          throw new PreparedModelRuntimeRecoveryError(
+            `prepared reply dispatch runtime owner was not published for ${agentId}; recovery failed. Check Gateway logs and retry the message after correcting the runtime failure.`,
+            { cause: error },
+          );
+        }
         demandPrepared = true;
         continue;
       }
@@ -170,7 +191,7 @@ export class PreparedReplyDispatchPublicationOwner {
           await racePromiseWithAbortSignal(this.#changed.promise, abortSignal);
           continue;
         }
-        throw new PreparedModelRuntimeOwnerNotPublishedError(
+        throw new PreparedModelRuntimeRecoveryError(
           `prepared reply dispatch runtime owner was not published for ${agentId}`,
         );
       }
@@ -180,7 +201,7 @@ export class PreparedReplyDispatchPublicationOwner {
           pendingOwner.needsRefresh ||
           pendingOwner.pluginGeneration !== runtime.pluginGeneration
         ) {
-          throw new PreparedModelRuntimeOwnerNotPublishedError(
+          throw new PreparedModelRuntimeRecoveryError(
             `prepared reply dispatch runtime owner was not published for ${agentId}`,
           );
         }

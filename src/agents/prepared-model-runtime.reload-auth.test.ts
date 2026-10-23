@@ -4,6 +4,11 @@ import { usePreparedModelRuntimeHarness } from "./prepared-model-runtime.test-ha
 import { isDeepStrictEqual } from "node:util";
 import { describe, expect, it, vi } from "vitest";
 import { createDeferred } from "../../test/helpers/promise.js";
+import { createChannelIngressDrain } from "../channels/message/ingress-drain.js";
+import {
+  createTestIngressQueue,
+  withTempState,
+} from "../channels/message/ingress-drain.test-helpers.js";
 import type { OpenClawConfig } from "../config/types.openclaw.js";
 import { createEmptyPluginRegistry } from "../plugins/registry-empty.js";
 import { getPluginLoaderCacheState } from "../plugins/registry-lifecycle.js";
@@ -85,6 +90,70 @@ function observePhases() {
 }
 
 describe("prepared model runtime reload auth adoption", () => {
+  it("republishes a failed auth owner on the next inbound dispatch", async () => {
+    await start();
+    const failure = new Error("configured model publication timed out");
+    mocks.resolveAmbientCredentials.mockRejectedValueOnce(failure);
+    mutate("default");
+    await expect(loadDispatch({ agentId: "default" })).rejects.toBe(failure);
+
+    const [first, concurrent] = await Promise.all([
+      loadDispatch({ agentId: "default" }),
+      loadDispatch({ agentId: "default" }),
+    ]);
+    expect(first?.agentId).toBe("default");
+    expect(concurrent?.pluginGeneration).toBe(first?.pluginGeneration);
+    expect(mocks.resolveAmbientCredentials).toHaveBeenCalledTimes(3);
+  });
+
+  it("retains an unrecoverable inbound message as a failed row after one retry", async () => {
+    await start();
+    const failure = new Error("configured model publication timed out");
+    mocks.resolveAmbientCredentials.mockRejectedValue(failure);
+    mutate();
+    await expect(loadDispatch({ agentId: "default" })).rejects.toBe(failure);
+
+    await withTempState(async (stateDir) => {
+      let now = 1_000;
+      const queue = createTestIngressQueue(stateDir, { now: () => now });
+      await queue.enqueue("unavailable", { text: "retained request" });
+      const log = vi.fn();
+      const drain = createChannelIngressDrain({
+        queue,
+        now: () => now,
+        onLog: log,
+        dispatchClaimedEvent: async () => {
+          await loadDispatch({ agentId: "default" });
+        },
+      });
+      try {
+        expect(await drain.drainOnce()).toEqual({ started: 1 });
+        await drain.waitForIdle();
+        expect(await queue.listPending()).toMatchObject([{ id: "unavailable", attempts: 1 }]);
+        now += 1_000;
+        expect(await drain.drainOnce()).toEqual({ started: 1 });
+        await drain.waitForIdle();
+        expect(await queue.listPending()).toEqual([]);
+        expect(await queue.listFailed?.()).toMatchObject([
+          {
+            id: "unavailable",
+            payload: { text: "retained request" },
+            reason: "runtime-recovery-failed",
+          },
+        ]);
+        expect(log).toHaveBeenCalledWith(expect.stringContaining("runtime-recovery-failed"));
+      } finally {
+        drain.dispose();
+      }
+      const restarted = createChannelIngressDrain({ queue, dispatchClaimedEvent: vi.fn() });
+      try {
+        expect(await restarted.drainOnce()).toEqual({ started: 0 });
+      } finally {
+        restarted.dispose();
+      }
+    });
+  });
+
   it("does not record an obsolete catalog attempt after its owner is superseded", async () => {
     mocks.configuredAgentIds = ["default"];
     const config = {};
@@ -246,11 +315,6 @@ describe("prepared model runtime reload auth adoption", () => {
 
     await expect(reload).rejects.toBe(reloadError);
     await expect(authWaiter).rejects.toBe(reloadError);
-    await expect(loadDispatch({ agentId: "default" })).rejects.toThrow(
-      "prepared reply dispatch runtime owner was not published for default",
-    );
-
-    await refresh(replacementConfig);
     await expect(loadDispatch({ agentId: "default" })).resolves.toMatchObject({
       config: replacementConfig,
     });
@@ -353,9 +417,6 @@ describe("prepared model runtime reload auth adoption", () => {
 
     await expect(workerDispatch).resolves.toMatchObject({ agentId: "worker" });
     await expect(researchDispatch).rejects.toBe(researchError);
-    await expect(loadDispatch({ agentId: "research" })).rejects.toThrow(
-      "prepared reply dispatch runtime owner was not published for research",
-    );
     expect(events).not.toContain("published");
     expect(events.filter((phase) => phase === "failed")).toHaveLength(1);
     unregister();
@@ -383,10 +444,8 @@ describe("prepared model runtime reload auth adoption", () => {
       agentId: "research",
       agentDir: fixture.state.agentDir("research"),
     });
-    await expect(loadDispatch({ agentId: "worker" })).rejects.toThrow(
-      "prepared reply dispatch runtime owner was not published for worker",
-    );
     expect(events.filter((phase) => phase === "failed")).toHaveLength(1);
+    await expect(loadDispatch({ agentId: "worker" })).resolves.toMatchObject({ agentId: "worker" });
     replaceSpy.mockRestore();
     unregister();
   });

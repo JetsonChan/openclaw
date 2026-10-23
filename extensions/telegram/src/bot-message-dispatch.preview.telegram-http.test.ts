@@ -312,6 +312,26 @@ describe("Telegram preview, presentation, and progress delivery through HTTP", (
     expect(acceptedTypingAt).toHaveLength(settledTypingCount);
   });
 
+  it("stops typing after a retryable dispatch failure without sending a fallback", async () => {
+    await runTurn(
+      async () => {
+        await http.waitForTypingSend();
+        throw new Error("prepared reply dispatch runtime owner was not published for default");
+      },
+      {
+        mode: "off",
+        allowErrors: true,
+        outcome: "failed-retryable",
+        suppressFailureFallback: true,
+      },
+    );
+    const typingCount = http.acceptedFor("sendChatAction").length;
+    expect(typingCount).toBeGreaterThan(0);
+    expect(sends()).toEqual([]);
+    await vi.advanceTimersByTimeAsync(8_000);
+    expect(http.acceptedFor("sendChatAction")).toHaveLength(typingCount);
+  });
+
   it.each(["control-only", "immediate", "buffered"] as const)(
     "delivers presentation controls through %s",
     async (branch) => {

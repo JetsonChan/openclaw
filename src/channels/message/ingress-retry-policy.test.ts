@@ -29,6 +29,19 @@ function disposition(
 }
 
 describe("ingress retry policy", () => {
+  it("bounds failed runtime recovery to two attempts without waiting a day", () => {
+    const error = wrapError(
+      codedError("runtime recovery failed", "PREPARED_MODEL_RUNTIME_RECOVERY_FAILED"),
+    );
+    expect(disposition(error, 0)).toMatchObject({ kind: "release", attempt: 1 });
+    expect(disposition(error, 1)).toMatchObject({
+      kind: "fail",
+      reason: "runtime-recovery-failed",
+      attempt: 2,
+    });
+    expect(disposition(new Error("runtime recovery failed"), 1)).toMatchObject({ kind: "release" });
+  });
+
   it.each([
     {
       name: "default cap",

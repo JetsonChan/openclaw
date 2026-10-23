@@ -287,7 +287,7 @@ export function createPreparedModelRuntimeRecovery(host: {
     }
   }
 
-  /** Rechecks only failed catalog-worker replacements, using the existing publication barrier. */
+  /** Rechecks failed publications using the existing publication barrier. */
   async function ensureGatewayPreparedModelRuntimeReady({
     agentId,
     demand = "interactive",
@@ -342,8 +342,8 @@ export function createPreparedModelRuntimeRecovery(host: {
     );
     const publication = host
       .publish(owner.input.config, {
-        catalogMode: "static",
-        allowGatewaySubagentBinding: true,
+        catalogMode: owner.catalogMode,
+        allowGatewaySubagentBinding: owner.input.allowGatewaySubagentBinding,
         agentIds: new Set(affected.flatMap((candidate) => candidate.input.agentId ?? [])),
         pluginMetadataSnapshot: owner.snapshot?.metadataSnapshot,
         isPublicationCurrent: () =>

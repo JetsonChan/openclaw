@@ -105,11 +105,14 @@ export function resolveIngressFailureDisposition(params: {
   }
   const errorCodes = new Set(collectNestedErrorCandidates(params.err).map(extractErrorCode));
   // Retrying this terminal generation blocks the authorized reset behind it.
+  // Failed runtime recovery gets one replay, rather than renewing typing for a day.
   const reason = errorCodes.has(SESSION_RESTART_RECOVERY_TOMBSTONE_ERROR_CODE)
     ? "restart-recovery-tombstone"
-    : shouldDeadLetterRetryableIngressEvent(params.event, attempt, params.config, now)
-      ? "retry-limit-exceeded"
-      : undefined;
+    : errorCodes.has("PREPARED_MODEL_RUNTIME_RECOVERY_FAILED") && attempt >= 2
+      ? "runtime-recovery-failed"
+      : shouldDeadLetterRetryableIngressEvent(params.event, attempt, params.config, now)
+        ? "retry-limit-exceeded"
+        : undefined;
   return reason
     ? { kind: "fail", reason, message, attempt }
     : { kind: "release", attempt, message };
