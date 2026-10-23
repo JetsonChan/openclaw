@@ -9,6 +9,7 @@ import {
   shellNavDrawerTriggerFromEvent,
   type CommandPaletteTargetDetail,
 } from "../components/command-palette-contract.ts";
+import { tabbableElements } from "../components/focus-navigation.ts";
 import { registryFor } from "../components/overlay-registry.ts";
 import {
   BROWSER_PANEL_TOGGLE_EVENT,
@@ -71,7 +72,6 @@ import {
   dismissNavigationTransientSurfaces,
   handleNavDrawerKeydown,
   setToastInNavDrawer,
-  navDrawerFocusableElements,
   visibleNavDrawerToggle,
   type ShellNavigationElements,
   type ShellNavigationSurfaces,
@@ -210,7 +210,7 @@ export class ShellChromeOwner {
         this.navDrawerSwipe.reset();
         const drawer = host.navDrawerElement;
         if (drawer) {
-          const target = navDrawerFocusableElements(drawer)[0] ?? drawer;
+          const [target = drawer] = tabbableElements(drawer.children);
           focusWithoutTooltip(target, { preventScroll: true });
         }
       });
