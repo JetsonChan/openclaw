@@ -1,0 +1,90 @@
+name: Fork CI
+
+on:
+  push:
+    branches: ["yueyue-prune-*", "yueyue-v2026.10.6"]
+  pull_request:
+    branches: ["yueyue-v2026.10.6"]
+
+permissions:
+  contents: read
+
+env:
+  # Explicit target assembly. This is the existing build selector, not a
+  # dependency resolver; package composition below is the second gate.
+  OPENCLAW_BUNDLED_PLUGIN_BUILD_IDS: >-
+    browser,codex,deepseek,document-extract,google,image-generation-core,
+    imessage,memory-core,minimax,ollama,openai,opencode,opencode-go,
+    volcengine,xai,zai
+
+jobs:
+  static:
+    name: Static and retained channel contracts
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 12.15.0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24.22.1
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm config:channels:check
+      - run: pnpm channels:catalog:check
+      - run: pnpm test:contracts:channels
+      - run: pnpm tsgo:extensions:test
+
+  build:
+    name: Selected build and package composition
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 12.15.0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24.22.1
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm build
+      - name: Compose the selected package
+        shell: bash
+        run: |
+          args=()
+          IFS=',' read -ra ids <<< "$OPENCLAW_BUNDLED_PLUGIN_BUILD_IDS"
+          for id in "${ids[@]}"; do
+            id="$(echo "$id" | tr -d '[:space:]')"
+            [ -n "$id" ] && args+=(--bundle-plugin "$id")
+          done
+          mkdir -p artifacts
+          node --import ./scripts/tsx.mjs scripts/package-openclaw-for-docker.mts \
+            --source-dir . \
+            --output-dir artifacts \
+            --output-name openclaw-yueyue.tgz \
+            --allow-unreleased-changelog \
+            --skip-build \
+            "${args[@]}"
+      - name: Verify selected distribution contents
+        shell: bash
+        run: |
+          test -d dist/extensions/imessage
+          test -d dist/extensions/memory-core
+          test ! -d dist/extensions/telegram
+          test ! -d dist/extensions/discord
+          tar -tzf artifacts/openclaw-yueyue.tgz > artifacts/contents.txt
+          grep -q 'package/dist/extensions/imessage/' artifacts/contents.txt
+          grep -q 'package/dist/extensions/memory-core/' artifacts/contents.txt
+          if grep -qE 'package/dist/extensions/(telegram|discord|feishu|slack|whatsapp|signal)/' artifacts/contents.txt; then
+            echo "non-target channel was packaged" >&2
+            exit 1
+          fi
+      - uses: actions/upload-artifact@v4
+        with:
+          name: openclaw-yueyue-package
+          path: artifacts/openclaw-yueyue.tgz
+          if-no-files-found: error
