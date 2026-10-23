@@ -1,5 +1,5 @@
 {
-  "startupJsGzipBytes": 325131,
-  "reason": "Jacob Tomlinson approved +50 B for PR #173135 (2026-10-22 16:06 UTC); allowance adjustment, not a measured bundle size; 512 B growth and 64 B build variance unchanged. Retains the Solid 2 runtime allowance (HF-STARTUP-BUDGET).",
+  "startupJsGzipBytes": 315881,
+  "reason": "Detailed tool rows defer parser and formatting work; matched build 258e9d7 measures 315881 B startup and 1405648 B Chat with unchanged critical requests.",
   "updatedAt": "2026-10-22"
 }

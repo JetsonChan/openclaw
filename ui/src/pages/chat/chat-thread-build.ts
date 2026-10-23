@@ -19,6 +19,7 @@ import {
   isAssistantHeartbeatAckForDisplay,
   stripHeartbeatTokenForDisplay,
 } from "../../lib/chat/heartbeat-display.ts";
+import { readChatThreadMessageIdentity } from "../../lib/chat/history-message-identity.ts";
 import { extractTextCached } from "../../lib/chat/message-extract.ts";
 import {
   canvasPreviewsMatch,
@@ -38,7 +39,7 @@ import {
 } from "./chat-progress.ts";
 import { activeChatReasoning } from "./chat-reasoning.ts";
 import {
-  hasSessionsYieldCall,
+  hasHandoffToolCall,
   pendingSessionsYield,
   projectSessionsYieldItems,
 } from "./chat-sessions-yield.ts";
@@ -67,7 +68,6 @@ import {
   type ChatProjection,
   messageMatchesSearchQuery,
   rawMessageTimestamp,
-  readChatThreadMessageIdentity,
   insertChatItemsByTimestamp,
   sanitizeStreamText,
   timestampAfterVisibleItems,
@@ -319,7 +319,7 @@ export function buildChatItems(
       !props.showToolCalls &&
       isToolResult &&
       !(raw.role === "assistant" && extractTextCached(msg)?.trim()) &&
-      !hasSessionsYieldCall(msg) &&
+      !hasHandoffToolCall(msg) &&
       !permissionInMessage(msg)
     ) {
       continue;
@@ -539,7 +539,7 @@ export function buildChatItems(
     if (
       tool &&
       (props.showToolCalls ||
-        hasSessionsYieldCall(tool.projection.item.message) ||
+        hasHandoffToolCall(tool.projection.item.message) ||
         permissionInMessage(tool.projection.item.message))
     ) {
       tool.projection.bounds = resolveProjectionBounds(
