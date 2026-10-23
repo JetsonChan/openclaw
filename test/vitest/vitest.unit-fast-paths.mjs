@@ -368,14 +368,27 @@ function collectRepoTestFiles(cwd, selected) {
   if (cached) {
     return cached;
   }
-  const inventory = getRepositoryFileInventory(cwd, selected);
+  const roots = ["src/", "packages/", "test/"];
+  let inventory = new Set();
+  // Full unit discovery needs only these roots. Separate pathspecs also let Git
+  // avoid checking deleted-file metadata elsewhere in the repository.
+  for (const scope of selected ? [selected] : roots.map((root) => [root])) {
+    const files = getRepositoryFileInventory(cwd, scope);
+    if (!files) {
+      inventory = null;
+      break;
+    }
+    for (const file of files) {
+      inventory.add(file);
+    }
+  }
   const files = inventory
     ? [...inventory]
         .map(normalizeRepoPath)
         .filter((file) => /^(?:src|packages|test)\//u.test(file) && file.endsWith(".test.ts"))
     : selected?.every((file) => file.endsWith(".test.ts"))
       ? selected
-      : ["src", "packages", "test"]
+      : roots
           .flatMap((directory) => walkFiles(path.join(cwd, directory)))
           .map((file) => normalizeRepoPath(path.relative(cwd, file)));
   walkedTestFilesByCwd.set(key, files);

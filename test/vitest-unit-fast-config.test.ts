@@ -207,7 +207,7 @@ describe("unit-fast vitest lane", () => {
       { include, excluded },
       { include, excluded },
     ]);
-    expect(configProbeResult.stdout).toContain("UNIT_FULL_EXCLUSION_PROBE true 1");
+    expect(configProbeResult.stdout).toContain("UNIT_FULL_EXCLUSION_PROBE true 0");
   });
 
   it("keeps lifecycle drains in their reset-capable owner without dropping test coverage", () => {
