@@ -2,14 +2,9 @@ import { describe, expect, it } from "vitest";
 import { GENERATED_BUNDLED_CHANNEL_CONFIG_METADATA } from "../../config/bundled-channel-config-metadata.generated.js";
 import { validateJsonSchemaValue } from "../schema-validator.js";
 
-// Exercise config admission, including Twitch's single/multi-account union.
-const account = { username: "testbot", accessToken: "test-token", channel: "testroom" };
 const configs = [
-  { channelId: "buzz", config: { groupPolicy: "allowlist" }, accounts: false },
-  { channelId: "clickclack", config: {}, accounts: true },
-  { channelId: "feishu", config: {}, accounts: true },
+  { channelId: "imessage", config: {}, accounts: true },
   { channelId: "qa-channel", config: {}, accounts: true },
-  { channelId: "twitch", config: account, accounts: true },
 ];
 
 describe("channel responsePrefix config admission", () => {

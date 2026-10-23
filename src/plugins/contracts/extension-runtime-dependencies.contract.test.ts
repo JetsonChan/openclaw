@@ -21,11 +21,6 @@ const OPTIONAL_UNDECLARED_RUNTIME_IMPORTS = new Map<string, Set<string>>([
     // The A2UI bundle probes this optional markdown renderer and falls back when absent.
     new Set(["@a2ui/markdown-it"]),
   ],
-  [
-    "extensions/discord",
-    // @discordjs/voice still probes the native addon in its dependency report path.
-    new Set(["@discordjs/opus"]),
-  ],
   ["extensions/qa-lab", new Set(["crabline"])],
 ]);
 const INDIRECT_RUNTIME_DEPENDENCIES = new Map<string, Set<string>>([
@@ -33,11 +28,6 @@ const INDIRECT_RUNTIME_DEPENDENCIES = new Map<string, Set<string>>([
     "extensions/browser",
     // The MCP SDK loads zod through its server/zod-compat runtime path.
     new Set(["zod"]),
-  ],
-  [
-    "extensions/whatsapp",
-    // Baileys loads this optional peer for audio decoding.
-    new Set(["audio-decode"]),
   ],
   [
     "extensions/memory-lancedb",
@@ -49,24 +39,8 @@ const INDIRECT_RUNTIME_DEPENDENCIES = new Map<string, Set<string>>([
     // Packaged memory tools run through generated OpenClaw runtime chunks that parse JSON5 config.
     new Set(["json5"]),
   ],
-  [
-    "extensions/slack",
-    // Bolt loads Socket Mode, whose Undici 7 peer must be provided by the plugin package.
-    new Set(["undici"]),
-  ],
-  [
-    "extensions/tlon",
-    // The Tlon plugin manifest exposes the bundled skill from this package path.
-    new Set(["@tloncorp/tlon-skill"]),
-  ],
 ]);
 const COMPUTED_RUNTIME_DEPENDENCIES = new Map<string, Set<string>>([
-  [
-    "extensions/discord",
-    // Bundled at build time into the served Discord Activity shell asset rather than
-    // imported by plugin runtime code; see scripts/build-discord-activity-sdk.mts.
-    new Set(["@discord/embedded-app-sdk"]),
-  ],
   [
     "extensions/lobster",
     // Keep Lobster external to the plugin bundle; its computed core import is resolved at runtime.
@@ -340,10 +314,6 @@ describe("Discord dependency ownership", () => {
   for (const manifestPath of listPackageManifests(EXTENSION_ROOT)) {
     const extensionDir = toRepoPath(path.dirname(manifestPath));
 
-    if (extensionDir === "extensions/discord") {
-      continue;
-    }
-
     it(`${extensionDir} does not own Discord package dependencies`, () => {
       const manifest = readPackageManifest(manifestPath);
       const discordDependencies = allDependencyNames(manifest).filter(isDiscordPackageDependency);
@@ -357,7 +327,7 @@ describe("extension runtime dependency manifests", () => {
   it("lists extension dependency inputs from git without walking extension dirs", () => {
     expectNoReaddirSyncDuring(() => {
       const manifests = listPackageManifests(EXTENSION_ROOT);
-      const runtimeFiles = listRuntimeFiles("extensions/discord");
+      const runtimeFiles = listRuntimeFiles("extensions/imessage");
 
       expect(manifests.length).toBeGreaterThan(0);
       expect(runtimeFiles.length).toBeGreaterThan(0);

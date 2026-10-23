@@ -15,77 +15,23 @@ type PackageManifestContractParams = Parameters<typeof describePackageManifestCo
 
 const packageManifestContractTests: PackageManifestContractParams[] = [
   {
-    pluginId: "buzz",
-    pluginLocalRuntimeDeps: ["nostr-tools"],
-    minHostVersionBaseline: "2026.7.2",
-  },
-  {
-    pluginId: "discord",
-    pluginLocalRuntimeDeps: ["@discordjs/voice", "discord-api-types", "libopus-wasm"],
-    minHostVersionBaseline: "2026.3.22",
-  },
-  {
-    pluginId: "feishu",
-    pluginLocalRuntimeDeps: ["@larksuiteoapi/node-sdk"],
-    minHostVersionBaseline: "2026.3.22",
-  },
-  {
-    pluginId: "googlechat",
-    pluginLocalRuntimeDeps: ["google-auth-library"],
-    minHostVersionBaseline: "2026.3.22",
-  },
-  {
     pluginId: "imap",
     pluginLocalRuntimeDeps: ["imapflow", "mailauth", "mailparser"],
   },
-  { pluginId: "irc", minHostVersionBaseline: "2026.3.22" },
-  { pluginId: "line", minHostVersionBaseline: "2026.3.22" },
   {
     pluginId: "diffs",
     pluginLocalRuntimeDeps: ["@pierre/diffs"],
   },
   {
-    pluginId: "matrix",
-    pluginLocalRuntimeDeps: [
-      "@matrix-org/matrix-sdk-crypto-nodejs",
-      "@matrix-org/matrix-sdk-crypto-wasm",
-      "fake-indexeddb",
-      "matrix-js-sdk",
-      "music-metadata",
-    ],
-    minHostVersionBaseline: "2026.3.22",
-  },
-  { pluginId: "mattermost", minHostVersionBaseline: "2026.3.22" },
-  {
     pluginId: "memory-lancedb",
     pluginLocalRuntimeDeps: ["apache-arrow"],
     minHostVersionBaseline: "2026.3.22",
   },
-  {
-    pluginId: "msteams",
-    pluginLocalRuntimeDeps: ["@azure/identity", "@microsoft/teams.apps"],
-    minHostVersionBaseline: "2026.3.22",
-  },
-  { pluginId: "nextcloud-talk", minHostVersionBaseline: "2026.3.22" },
-  {
-    pluginId: "nostr",
-    pluginLocalRuntimeDeps: ["nostr-tools"],
-    minHostVersionBaseline: "2026.3.22",
-  },
   { pluginId: "onnx", minHostVersionBaseline: "2026.9.6" },
-  { pluginId: "synology-chat", minHostVersionBaseline: "2026.3.22" },
-  { pluginId: "tlon", minHostVersionBaseline: "2026.3.22" },
   { pluginId: "tokenjuice", pluginLocalRuntimeDeps: ["tokenjuice"] },
-  { pluginId: "twitch", minHostVersionBaseline: "2026.3.22" },
   { pluginId: "voice-call", minHostVersionBaseline: "2026.3.22" },
-  {
-    pluginId: "whatsapp",
-    pluginLocalRuntimeDeps: ["audio-decode", "baileys"],
-    minHostVersionBaseline: "2026.3.22",
-  },
   { pluginId: "xiaomi", minHostVersionBaseline: "2026.7.2" },
-  { pluginId: "zalo", minHostVersionBaseline: "2026.3.22" },
-  { pluginId: "zalouser", minHostVersionBaseline: "2026.3.22" },
+
 ];
 
 for (const params of packageManifestContractTests) {

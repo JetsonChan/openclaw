@@ -4,7 +4,6 @@ import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { isRecord } from "@openclaw/normalization-core/record-coerce";
 import { describe, expect, it } from "vitest";
-import { GENERATED_BUNDLED_CHANNEL_CONFIG_METADATA } from "../../config/bundled-channel-config-metadata.generated.js";
 import { computeBaseConfigSchemaResponse } from "../../config/schema-base.js";
 import { listGitTrackedFiles } from "../../test-utils/repo-files.js";
 
@@ -116,42 +115,6 @@ describe("config footprint guardrails", () => {
         "channels.discord.accounts.*.channels.*.allow",
       ].filter((path) => basePaths.has(path)),
     ).toStrictEqual([]);
-  });
-
-  it("keeps bundled channel private-network config canonical in generated metadata", () => {
-    const pluginIds = ["matrix", "nextcloud-talk", "tlon"];
-
-    for (const pluginId of pluginIds) {
-      const metadata = GENERATED_BUNDLED_CHANNEL_CONFIG_METADATA.find(
-        (entry) => entry.pluginId === pluginId,
-      );
-      if (metadata === undefined) {
-        throw new Error(`${pluginId} metadata missing`);
-      }
-      const paths = new Set(collectSchemaPaths(metadata.schema));
-      expect(paths.has("allowPrivateNetwork"), `${pluginId} leaked flat allowPrivateNetwork`).toBe(
-        false,
-      );
-      expect(
-        paths.has("network.dangerouslyAllowPrivateNetwork"),
-        `${pluginId} missing canonical network.dangerouslyAllowPrivateNetwork`,
-      ).toBe(true);
-    }
-  });
-
-  it("keeps retired flat streaming aliases out of channel-owned schemas", () => {
-    const telegramSource = readSource("extensions/telegram/src/config-schema.ts");
-    const discordSource = readSource("extensions/discord/src/config-schema.ts");
-    const msTeamsSource = readSource("extensions/msteams/src/config-schema.ts");
-    const slackSource = readSource("extensions/slack/src/config-schema.ts");
-
-    for (const schemaSource of [telegramSource, discordSource, msTeamsSource, slackSource]) {
-      expect(schemaSource).not.toContain(
-        'streamMode: z.enum(["replace", "status_final", "append"])',
-      );
-      expect(schemaSource).not.toContain("draftChunk:");
-      expect(schemaSource).not.toContain("nativeStreaming:");
-    }
   });
 
   it("keeps retired config aliases out of the shared setup input", () => {

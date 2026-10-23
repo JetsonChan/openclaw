@@ -430,13 +430,13 @@ describe("plugin session attachments", () => {
     await withSessionStore(async ({ storePath, filePath }) => {
       await writeSessionEntry(storePath, {
         delivery: normalizeSessionDeliveryState({
-          context: { channel: "whatsapp", to: "+15551234567" },
+          context: { channel: "imessage", to: "+15551234567" },
         }),
       });
       setActivePluginRegistry(createEmptyPluginRegistry());
       workflowMocks.getChannelPlugin.mockReturnValue(
         createOutboundTestPlugin({
-          id: "whatsapp",
+          id: "imessage",
           outbound: { deliveryMode: "gateway" },
         }),
       );
@@ -448,7 +448,7 @@ describe("plugin session attachments", () => {
       ).resolves.toEqual({
         ok: false,
         error:
-          "session attachments require direct outbound delivery for channel whatsapp; " +
+          "session attachments require direct outbound delivery for channel imessage; " +
           "channel uses gateway delivery",
       });
       expect(workflowMocks.sendMessage).not.toHaveBeenCalled();
@@ -457,7 +457,11 @@ describe("plugin session attachments", () => {
 
   it("returns structured errors when channel delivery lookup fails", async () => {
     await withSessionStore(async ({ storePath, filePath }) => {
-      await writeSessionEntry(storePath);
+      await writeSessionEntry(storePath, {
+        delivery: normalizeSessionDeliveryState({
+          context: { channel: "imessage", to: "+15551234567" },
+        }),
+      });
       workflowMocks.getChannelPlugin.mockImplementation(() => {
         throw new Error("channel registry unavailable");
       });

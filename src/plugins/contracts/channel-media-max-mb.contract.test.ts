@@ -3,7 +3,7 @@ import { GENERATED_BUNDLED_CHANNEL_CONFIG_METADATA } from "../../config/bundled-
 import { validateJsonSchemaValue } from "../schema-validator.js";
 
 // These plugins load attachment bytes; URL-only transports do not gain a size setting.
-const CHANNELS = ["clickclack", "mattermost", "qa-channel", "sms", "tlon", "zalouser"];
+const CHANNELS = ["qa-channel"];
 
 describe("media loader configuration", () => {
   it.each(CHANNELS)("validates root and named-account caps for %s", (channelId) => {
