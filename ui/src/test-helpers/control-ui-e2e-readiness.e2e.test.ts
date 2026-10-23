@@ -24,7 +24,7 @@ function trackReadinessRequests(page: Page) {
 }
 
 suite.define(() => {
-  it.each(["exec-approval-card", "gateway-switch"])(
+  it.each(["exec-approval-card", "gateway-switch", "session-worker-stop"])(
     "waits for delayed %s confirmation content rather than an unrelated open modal",
     async (contentClass) => {
       await suite.withPage({}, async ({ page }) => {
@@ -46,7 +46,10 @@ suite.define(() => {
           });
         }, contentClass);
         expect(await page.locator("." + contentClass).count()).toBe(0);
-        const ready = waitForConfirmModal(page);
+        const ready = waitForConfirmModal(
+          page,
+          page.locator("openclaw-modal-dialog").filter({ has: page.locator("." + contentClass) }),
+        );
         await page.getByRole("button", { name: "Render confirmation", exact: true }).click();
         const confirmation = await ready;
         expect(await confirmation.getAttribute("id")).toBe("confirmation");
