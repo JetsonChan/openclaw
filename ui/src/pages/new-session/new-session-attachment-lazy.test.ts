@@ -28,14 +28,24 @@ function routeData(agentId: string): NewSessionRouteData {
   };
 }
 
-async function pasteAttachment(page: HTMLElement, text: string) {
+async function enterMessage(page: NewSessionElement, message: string) {
   const textarea = page.querySelector<HTMLTextAreaElement>(".new-session-page__message")!;
+  textarea.value = message;
+  textarea.dispatchEvent(new InputEvent("input", { bubbles: true, composed: true }));
+  await page.updateComplete;
+  return textarea;
+}
+
+async function pasteAttachment(page: NewSessionElement, text: string) {
+  const textarea = await enterMessage(page, "Review the attachment");
   const paste = new Event("paste", { bubbles: true, cancelable: true });
   Object.defineProperty(paste, "clipboardData", {
     value: { items: [], getData: () => text },
   });
   textarea.dispatchEvent(paste);
   expect(paste.defaultPrevented).toBe(true);
+  await page.updateComplete;
+  await vi.dynamicImportSettled();
   await waitForSolid(() =>
     expect(
       page.querySelector("openclaw-chat-pasted-text .chat-attachment-file__open"),
@@ -69,10 +79,7 @@ it("keeps the draft usable during a cold preview and retires the preview before 
     expect(detailImport.started).toBe(true);
     expect(page.querySelector(".new-session-attachment-panel [role='status']")).not.toBeNull();
   });
-  const textarea = page.querySelector<HTMLTextAreaElement>(".new-session-page__message")!;
-  textarea.value = "Keep typing while the preview loads";
-  textarea.dispatchEvent(new InputEvent("input", { bubbles: true, composed: true }));
-  await page.updateComplete;
+  const textarea = await enterMessage(page, "Keep typing while the preview loads");
   expect(page.querySelector(".new-session-page__message")).toBe(textarea);
   expect(textarea.value).toBe("Keep typing while the preview loads");
 
