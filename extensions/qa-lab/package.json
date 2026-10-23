@@ -18,12 +18,7 @@
   },
   "devDependencies": {
     "@openclaw/crabbox-provider": "workspace:*",
-    "@openclaw/discord": "workspace:*",
-    "@openclaw/matrix": "workspace:*",
-    "@openclaw/mattermost": "workspace:*",
     "@openclaw/plugin-sdk": "workspace:*",
-    "@openclaw/slack": "workspace:*",
-    "@openclaw/whatsapp": "workspace:*",
     "openclaw": "workspace:*",
     "vite": "8.3.2"
   },
