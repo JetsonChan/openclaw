@@ -9,7 +9,6 @@ import {
   Repeat,
   Show,
   Switch,
-  onCleanup,
   type Accessor,
   refresh,
   untrack,
@@ -103,24 +102,24 @@ type ContentProps = {
 /** Message identity owns text/media DOM; option refreshes only publish new facts. */
 export function GroupedMessage(props: GroupedMessageProps) {
   const refreshMedia = () => void refresh(state);
-  const state = createMemo(() => {
-    observeChatMediaResourceSubscriber(props.options.mediaOwner, refreshMedia);
-    return prepareGroupedMessage(
-      props.preparation,
-      props.messageKey,
-      props.options,
-      props.onOpenSidebar,
-    );
-  });
+  const state = createMemo(() =>
+    prepareGroupedMessage(props.preparation, props.messageKey, props.options, props.onOpenSidebar),
+  );
   const messageElements = useContext(TranscriptMessageElementsContext);
   // The keyed message owns this DOM registration through acknowledgement and option refreshes.
   const initialMessageKey = untrack(() => props.messageKey);
   // Expiring pairing QR attachments schedule a timer at their resource owner.
   createEffect(
-    () => [props.messageKey, state().nextPairingQrExpiresAt] as const,
-    ([key, expiresAt]) => schedulePairingQrExpiryRefresh(key, expiresAt, refreshMedia),
+    () => [props.options.mediaOwner, props.messageKey, state().nextPairingQrExpiresAt] as const,
+    ([owner, key, expiresAt]) => {
+      if (expiresAt === undefined) {
+        return undefined;
+      }
+      observeChatMediaResourceSubscriber(owner, refreshMedia);
+      schedulePairingQrExpiryRefresh(key, expiresAt, refreshMedia);
+      return () => releaseChatMediaResourceOwner(refreshMedia);
+    },
   );
-  onCleanup(() => releaseChatMediaResourceOwner(refreshMedia));
   return (
     <Show
       when={state().workspaceConflict}
