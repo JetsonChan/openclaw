@@ -466,6 +466,7 @@ async function disposeRecoveryArtifacts({
   }
   // Every referencing manifest is durable before the first artifact in this selection moves.
   for (const run of runs) {
+    assertCurrent?.();
     writeSessionSqliteMigrationManifest(run);
   }
   let activeItem: (typeof selected)[number] | undefined;
@@ -512,7 +513,11 @@ async function disposeRecoveryArtifacts({
           item.path,
           disposal.claimPath,
           identity,
-          undefined,
+          () => {
+            // Publication awaited durable I/O; the host may have revoked this worker.
+            assertCurrent?.();
+            return undefined;
+          },
           undefined,
           verification,
         );
@@ -525,6 +530,7 @@ async function disposeRecoveryArtifacts({
     }
     // All claims, including their unlink intents, must survive a crash before disposal starts.
     for (const run of runs) {
+      assertCurrent?.();
       writeSessionSqliteMigrationManifest(run);
     }
     for (const { item, artifact, disposal, present } of claims) {
@@ -545,12 +551,13 @@ async function disposeRecoveryArtifacts({
       activeItem = item;
       assertDestinations(refs);
     }
-    // No awaits between selection validation and its unlinks. Completion I/O comes after
-    // this commit section; durable unlink-pending receipts make every partial failure retryable.
+    // The host can revoke worker authority even between synchronous unlinks.
+    // Durable unlink-pending receipts make every partial failure retryable.
     for (const { item, artifact, disposal } of claims) {
       activeItem = item;
       const claim = statMigrationPath(disposal.claimPath);
       if (claim) {
+        assertCurrent?.();
         fs.unlinkSync(disposal.claimPath);
         item.removedBytes = artifact.identity.size;
       }
@@ -578,6 +585,7 @@ async function disposeRecoveryArtifacts({
       }
     }
     for (const run of runs) {
+      assertCurrent?.();
       writeSessionSqliteMigrationManifest(run);
     }
   } catch (error) {

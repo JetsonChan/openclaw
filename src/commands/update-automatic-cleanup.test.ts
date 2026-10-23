@@ -14,6 +14,7 @@ import { acquireGatewayLock } from "../infra/gateway-lock.js";
 import { acquireGatewayStateOwner } from "../infra/gateway-state-owner.js";
 import {
   createSessionSqliteMigrationRun,
+  readSessionSqliteMigrationManifest,
   resolveSessionSqliteMigrationRunsDir,
   writeSessionSqliteMigrationManifest,
 } from "../infra/session-sqlite-migration-manifest.js";
@@ -263,6 +264,96 @@ it("runs retirement in the owning Gateway worker while manual cleanup still refu
     await lock?.release();
   }
 });
+
+it.each(["claim-publication", "first-unlink"] as const)(
+  "stops migration-original retirement when its physical owner is replaced after %s",
+  async (phase) => {
+    const fixture = await createVerifiedRecoveryStore();
+    env = fixture.store.env;
+    stateDir = fixture.store.stateDir;
+    const originals = new Map(
+      fixture.target.completedMoves
+        .filter((move) => move.artifact?.classification !== "protected")
+        .map((move) => [move.archivePath, fs.readFileSync(move.archivePath)]),
+    );
+    expect(originals.size).toBe(2);
+    const runId = start(now);
+    const current = capture(runId);
+    finishUpdateRun(runId, { status: "succeeded" }, { env });
+    await closeOpenClawStateDatabaseAsync();
+    const acquire = () =>
+      acquireGatewayStateOwner({
+        databasePath: resolveOpenClawStateSqlitePath(env),
+        payload: {
+          pid: process.pid,
+          createdAt: new Date().toISOString(),
+          configPath: env.OPENCLAW_CONFIG_PATH!,
+          role: "gateway",
+          processNamespace: readGatewayLockProcessNamespace(),
+        },
+      });
+    const originalOwner = acquire();
+    let successor: ReturnType<typeof acquire> | undefined;
+    const moves = () =>
+      readSessionSqliteMigrationManifest(fixture.manifestPath)!.targets[0]!.completedMoves.filter(
+        (move) => originals.has(move.archivePath),
+      );
+    const remaining = () =>
+      moves().flatMap((move) => {
+        const disposal = move.artifact!.disposal;
+        const retained = fs.existsSync(move.archivePath)
+          ? move.archivePath
+          : disposal.state === "pending-disposal" && fs.existsSync(disposal.claimPath)
+            ? disposal.claimPath
+            : undefined;
+        return retained ? [{ original: move.archivePath, retained }] : [];
+      });
+    try {
+      const result = await cleanupGatewayUpdateRecovery(runId, env, () => {
+        // Observe real worker effects, then replace the real physical owner.
+        // Production host admission still decides whether the next effect is allowed.
+        const reached =
+          phase === "claim-publication"
+            ? moves().some(
+                (move) =>
+                  move.artifact?.disposal.state === "pending-disposal" &&
+                  fs.existsSync(move.artifact.disposal.claimPath),
+              )
+            : remaining().length < originals.size;
+        if (!successor && reached) {
+          originalOwner.release();
+          successor = acquire();
+        }
+      });
+      expect(successor, JSON.stringify(result)).toBeDefined();
+      expect(result?.advisory).toBeDefined();
+      expect(() => originalOwner.assertCurrent()).toThrow();
+      successor!.assertCurrent();
+      const retained = remaining();
+      expect(retained).toHaveLength(phase === "claim-publication" ? 2 : 1);
+      for (const { original, retained: file } of retained) {
+        expect(fs.readFileSync(file)).toEqual(originals.get(original));
+      }
+      if (phase === "claim-publication") {
+        for (const [file, bytes] of originals) {
+          expect(fs.existsSync(file)).toBe(true);
+          expect(fs.readFileSync(file)).toEqual(bytes);
+        }
+      }
+      expect(fs.existsSync(current)).toBe(true);
+      expect(getUpdateRun(runId, { env })?.status).toBe("succeeded");
+      // Durable partial-disposal receipts remain retryable by the successor owner.
+      const retried = await cleanupGatewayUpdateRecovery(runId, env);
+      expect(retried?.advisory).toBeUndefined();
+      expect(remaining()).toEqual([]);
+      expect(fs.existsSync(current)).toBe(true);
+      expect(getUpdateRun(runId, { env })?.status).toBe("succeeded");
+    } finally {
+      originalOwner.release();
+      successor?.release();
+    }
+  },
+);
 
 it("does not retire artifacts when another process owns live state", async () => {
   const first = start(now - 120_000);
