@@ -1,3 +1,4 @@
+import { isRecord } from "@openclaw/normalization-core/record-coerce";
 import { describe, expect, it, vi } from "vitest";
 // Preserve module setup before modules that consume it.
 // oxfmt-ignore
@@ -384,7 +385,9 @@ describe("detached subagent restart recovery", () => {
           { agentId: "main", sessionKey: childSessionKey, sessionId: "warm-restart-child-session" },
           { mode: "recent", maxMessages: 20, maxBytes: 256 * 1024 },
         );
-        expect(messages.filter((message) => message.role === "assistant")).toEqual([
+        expect(
+          messages.filter((message) => isRecord(message) && message.role === "assistant"),
+        ).toEqual([
           expect.objectContaining({
             content: expect.arrayContaining([
               expect.objectContaining({
