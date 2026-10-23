@@ -57,17 +57,15 @@ export async function resolveEmbeddedAttemptMemoryAudience(params: {
   if (resolution.status === "granted") {
     return { memoryAudience: resolution.audience, release: resolution.release };
   }
-  // A denial grants no private or conversation memory. Stale lineage warns once
-  // per attempt because its reason names the only repair; transient checks are
-  // retried by the next turn, and ineligible lineage is the intended outcome.
+  // A denial grants no private or conversation memory, and memory tools then
+  // fail pointing at this entry. Stale lineage warns because its reason names
+  // the only repair; every other denial stays visible at info.
   const message = `memory audience unavailable: ${resolution.reason}`;
-  const meta = { event: "memory_audience_denied", kind: resolution.kind };
-  const level =
-    resolution.kind === "stale-lineage"
-      ? "warn"
-      : resolution.kind === "unverified"
-        ? "info"
-        : "debug";
-  log[level](message, meta);
+  const meta = {
+    event: "memory_audience_denied",
+    kind: resolution.kind,
+    sessionKey: params.sessionKey,
+  };
+  log[resolution.kind === "stale-lineage" ? "warn" : "info"](message, meta);
   return { release: retainedAudience };
 }
