@@ -36,7 +36,8 @@ export function PluginSettingsReadStatus(props: {
     const readiness = createMemo(async () => {
       const currentError = error();
       const read = config();
-      const [configOutcome, schemaOutcome] = await Promise.all([read?.settled, schema()]);
+      const schemaOutcome = schema();
+      const configOutcome = await read?.settled;
       // Retired reads and later writes own separate outcomes.
       const failed = [config() === read ? configOutcome : null, schemaOutcome].find(
         (outcome) => outcome && !outcome.ok && outcome.error === currentError,

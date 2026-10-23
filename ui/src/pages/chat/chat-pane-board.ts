@@ -479,7 +479,7 @@ export abstract class ChatPaneBoard extends ChatPaneHistory {
     void import("../../lib/sessions/swarm-roster.ts")
       .then((swarm) => {
         if (!this.isConnected || this.context !== context) {
-          return;
+          return undefined;
         }
         return context.connectionBootstrap.run(
           this,
@@ -494,10 +494,7 @@ export abstract class ChatPaneBoard extends ChatPaneHistory {
       .catch(() => undefined);
   }
 
-  private hydrateSwarmRoster({
-    isSwarmEnabledInConfig,
-    SwarmRosterHydrator,
-  }: typeof import("../../lib/sessions/swarm-roster.ts")): void {
+  private hydrateSwarmRoster(swarm: typeof import("../../lib/sessions/swarm-roster.ts")): void {
     const state = this.state;
     const context = this.context;
     if (!state || !this.presented || !this.isConnected) {
@@ -524,7 +521,7 @@ export abstract class ChatPaneBoard extends ChatPaneHistory {
       state.connectionEpoch === sourceEpoch &&
       parentKey === this.resolveChatReadTarget()?.sessionKey &&
       agentId === this.resolveChatReadTarget()?.agentId;
-    this.swarm.enabled = isSwarmEnabledInConfig(
+    this.swarm.enabled = swarm.isSwarmEnabledInConfig(
       context.runtimeConfig ? currentDisplayConfig(context.runtimeConfig.state) : null,
       agentId,
     );
@@ -535,7 +532,7 @@ export abstract class ChatPaneBoard extends ChatPaneHistory {
       this.swarm.hydrator = null;
       return;
     }
-    this.swarm.hydrator ??= new SwarmRosterHydrator();
+    this.swarm.hydrator ??= new swarm.SwarmRosterHydrator();
     this.swarm.hydrator.update({
       sessions: context.sessions,
       parentKey,

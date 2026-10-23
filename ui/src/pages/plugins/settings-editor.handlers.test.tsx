@@ -39,7 +39,9 @@ async function retireSettingsReadView(read: ConfigRead) {
     />
   ));
   // Let the completed read leave Loading before retiring its rendering owner.
-  await new Promise<void>((resolve) => setTimeout(resolve, 0));
+  await new Promise<void>((resolve) => {
+    setTimeout(resolve, 0);
+  });
   flush();
   view.unmount();
   flush();
