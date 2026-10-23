@@ -1,4 +1,5 @@
 import { afterEach, expect, it, vi } from "vitest";
+import * as staleChunkReload from "../../app/stale-chunk-reload.ts";
 import { waitForSolid } from "../../test-helpers/solid-settle.ts";
 import type { NewSessionRouteData } from "./location.ts";
 import "./new-session-page-entry.ts";
@@ -9,7 +10,7 @@ const detailImport = vi.hoisted(() => ({
   first: Promise.withResolvers<void>(),
   ready: Promise.withResolvers<void>(),
   recovery: Promise.withResolvers<void>(),
-  canReload: () => false,
+  canReload: (): boolean => false,
 }));
 vi.mock("../chat/components/chat-detail-panel.tsx", async (importOriginal) => {
   detailImport.started = true;
@@ -19,22 +20,6 @@ vi.mock("../chat/components/chat-detail-panel.tsx", async (importOriginal) => {
   }
   await detailImport.ready.promise;
   return importOriginal();
-});
-vi.mock("../../app/stale-chunk-reload.ts", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("../../app/stale-chunk-reload.ts")>();
-  return {
-    ...actual,
-    // Vitest wraps rejected mock imports; browsers deliver the original import error.
-    isStaleChunkImportError: (error: unknown) =>
-      actual.isStaleChunkImportError(
-        error instanceof Error && error.cause instanceof Error ? error.cause : error,
-      ),
-    retryStaleChunkReloadWhenReachable: async (options: { canReload: () => boolean }) => {
-      detailImport.canReload = options.canReload;
-      await detailImport.recovery.promise;
-      return false;
-    },
-  };
 });
 
 type NewSessionElement = HTMLElement & {
@@ -90,6 +75,20 @@ afterEach(async () => {
 });
 
 it("keeps the draft usable through a cold preview retry and retires it before the import settles", async () => {
+  const isStaleChunkImportError = staleChunkReload.isStaleChunkImportError;
+  // Vitest wraps rejected mock imports; browsers deliver the original import error.
+  vi.spyOn(staleChunkReload, "isStaleChunkImportError").mockImplementation((error) =>
+    isStaleChunkImportError(
+      error instanceof Error && error.cause instanceof Error ? error.cause : error,
+    ),
+  );
+  vi.spyOn(staleChunkReload, "retryStaleChunkReloadWhenReachable").mockImplementation(
+    async (options) => {
+      detailImport.canReload = options.canReload;
+      await detailImport.recovery.promise;
+      return false;
+    },
+  );
   const page = document.createElement("openclaw-new-session-page") as NewSessionElement;
   page.data = routeData("research");
   document.body.append(page);
