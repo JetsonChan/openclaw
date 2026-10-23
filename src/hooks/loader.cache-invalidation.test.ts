@@ -6,6 +6,7 @@ import type { OpenClawConfig } from "../config/types.openclaw.js";
 import * as boundaryFile from "../infra/boundary-file-read.js";
 import { setLoggerOverride } from "../logging/logger.js";
 import { loggingState } from "../logging/state.js";
+import { pinConfigDir } from "../utils.js";
 import { writeHookFixture } from "./hook-fixture.test-support.js";
 import {
   clearInternalHooks,
@@ -34,6 +35,8 @@ describe("loaded hook import freshness", () => {
     setLoggerOverride({ level: "silent", consoleLevel: "error" });
     loggingState.rawConsole = { log: vi.fn(), info: vi.fn(), warn: vi.fn(), error: vi.fn() };
     workspaceDir = tempDirs.make("openclaw-hook-import-freshness-");
+    pinConfigDir({ OPENCLAW_STATE_DIR: path.join(workspaceDir, "unused-state") });
+    vi.stubEnv("OPENCLAW_BUNDLED_HOOKS_DIR", path.join(workspaceDir, "unused-bundled"));
     const hookDir = path.join(workspaceDir, "hooks", "reload-hook");
     handlerPath = path.join(hookDir, "handler.js");
     writeHookFixture(
@@ -50,6 +53,8 @@ describe("loaded hook import freshness", () => {
     clearInternalHooks();
     setInternalHooksEnabled(true);
     vi.restoreAllMocks();
+    vi.unstubAllEnvs();
+    pinConfigDir();
   });
 
   async function loadAndExpect(message: string) {
