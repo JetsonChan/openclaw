@@ -30,43 +30,46 @@ import { areSessionCatalogsSettled } from "./session-data-catalog.ts";
 /** Fetching a page is useless if the new rows land behind a section's local cap,
  *  so an explicit roster load reveals a page in every section too -- otherwise
  *  the click can look like undefined happened. */
-function renderRosterLoadMore(
-  host: SidebarSessionListHost,
-  sections: RenderableSessionSection[],
-  hasMore: boolean | undefined,
-  loading: boolean,
-) {
-  if (!hasMore) {
-    return undefined;
-  }
+function RosterLoadMore(props: {
+  host: SidebarSessionListHost;
+  sections: RenderableSessionSection[];
+  hasMore: boolean;
+  loading: boolean;
+}) {
   return (
-    <div class="sidebar-session-pagination sidebar-session-pagination--roster">
-      <button
-        type="button"
-        class="sidebar-session-pagination__button"
-        aria-label={loading ? t("common.loading") : t("chat.selectors.loadMoreRosterSessions")}
-        disabled={loading}
-        aria-busy={loading ? "true" : "false"}
-        onClick={() => {
-          // The request owner changes before the DOM commits the disabled attribute.
-          // A repeated activation must not reveal local rows during that read.
-          if (host.sessionData.sessionsLoading) {
-            return;
+    <Show when={props.hasMore}>
+      <div class="sidebar-session-pagination sidebar-session-pagination--roster">
+        <button
+          type="button"
+          class="sidebar-session-pagination__button"
+          aria-label={
+            props.loading ? t("common.loading") : t("chat.selectors.loadMoreRosterSessions")
           }
-          void host.sessionData.loadMoreSidebarSessions().then(() => {
-            for (const section of sections) {
-              host.setVisibleSessionLimit(
-                section.id,
-                section.visibleLimit + SIDEBAR_SESSION_PAGE_SIZE,
-              );
+          disabled={props.loading}
+          aria-busy={props.loading ? "true" : "false"}
+          onClick={() => {
+            const host = props.host;
+            const sections = props.sections;
+            // The request owner changes before the DOM commits the disabled attribute.
+            // A repeated activation must not reveal local rows during that read.
+            if (host.sessionData.sessionsLoading) {
+              return;
             }
-          });
-        }}
-      >
-        {loading ? <span class="session-run-spinner" aria-hidden="true" /> : undefined}
-        {loading ? t("common.loading") : t("chat.selectors.loadMoreRosterSessions")}
-      </button>
-    </div>
+            void host.sessionData.loadMoreSidebarSessions().then(() => {
+              for (const section of sections) {
+                host.setVisibleSessionLimit(
+                  section.id,
+                  section.visibleLimit + SIDEBAR_SESSION_PAGE_SIZE,
+                );
+              }
+            });
+          }}
+        >
+          {props.loading ? <span class="session-run-spinner" aria-hidden="true" /> : undefined}
+          {props.loading ? t("common.loading") : t("chat.selectors.loadMoreRosterSessions")}
+        </button>
+      </div>
+    </Show>
   );
 }
 
@@ -168,12 +171,12 @@ export function renderSessionList(params: {
     <div class="sidebar-recent-sessions">
       {renderPendingSessionCreateRow(unplacedCreate)}
       {renderSessionListBody(params)}
-      {renderRosterLoadMore(
-        host(),
-        params.sections,
-        params.nativeSessionsHaveMore,
-        params.nativeSessionsLoading,
-      )}
+      <RosterLoadMore
+        host={host()}
+        sections={params.sections}
+        hasMore={params.nativeSessionsHaveMore}
+        loading={params.nativeSessionsLoading}
+      />
       {renderPersonalSessionEmpty(
         host(),
         params.empty && params.sections.every((section) => section.totalRowCount === 0),
