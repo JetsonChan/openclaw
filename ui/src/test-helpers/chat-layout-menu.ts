@@ -59,6 +59,9 @@ export async function openChatPanels(
   presentation: "mobile" | "desktop",
 ): Promise<Locator> {
   const pane = nativePane(scope);
+  const headers = ".agent-chat__header--mobile, .sidebar-region__header, [data-region-header]";
+  await pane.locator(headers).filter({ visible: true }).first().waitFor();
+  await waitForLayoutSettled(pane.page(), "openclaw-chat-pane :is(" + headers + ")");
   // The scenario owns its target layout; old controls may remain visible during a viewport change.
   if (presentation === "mobile") {
     const trigger = pane.locator(".agent-chat__header--mobile .chat-header-session-menu__trigger");
