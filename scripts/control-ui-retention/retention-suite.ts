@@ -330,6 +330,8 @@ for (const scene of selectedScenes) {
 for (const scene of documentScenes.filter((entry) => filter.test(entry.id))) {
   it(scene.id, async () => {
     await measure(scene.id, scene.scenario, async (page, gateway, sample) => {
+      // Full documents reload lazy chunks; use the route helper's readiness budget.
+      page.setDefaultTimeout(60_000);
       await scene.visit(page, gateway, server.baseUrl);
       await sample(0);
       for (let cycle = 1; cycle <= 10; cycle++) {

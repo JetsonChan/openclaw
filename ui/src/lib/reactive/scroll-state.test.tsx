@@ -222,13 +222,7 @@ it("keeps untracked scroll state until the next layout observation", () => {
 });
 
 it("resamples loaded font metrics only for the current presented element", async () => {
-  let fontsReady!: () => void;
   const fonts = new EventTarget();
-  Object.defineProperty(fonts, "ready", {
-    value: new Promise<void>((resolve) => {
-      fontsReady = resolve;
-    }),
-  });
   const originalFonts = Object.getOwnPropertyDescriptor(document, "fonts");
   Object.defineProperty(document, "fonts", { configurable: true, value: fonts });
   cleanup.push(() => {
@@ -261,8 +255,7 @@ it("resamples loaded font metrics only for the current presented element", async
   vi.advanceTimersToNextFrame();
   firstGeometry.extent = 50;
   secondGeometry.extent = 50;
-  fontsReady();
-  await Promise.resolve();
+  fonts.dispatchEvent(new Event("loadingdone"));
   vi.advanceTimersToNextFrame();
   expect(first.dataset.scrollable).toBe("true");
   expect(second.dataset.scrollable).toBe("false");

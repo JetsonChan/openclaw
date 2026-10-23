@@ -102,10 +102,6 @@ export const documentScenes: DocumentScene[] = [
       // Refresh only fixture deadlines; retain native clocks for the census.
       await gateway.setMethodResponse("approval.get", { approval: pendingApproval() });
       await page.goto(new URL(`/approve/${approvalId}`, baseUrl).href);
-      await gateway.waitForRequest("approval.get", {
-        match: { id: approvalId },
-        exactParams: true,
-      });
       const approval = page.locator("openclaw-approval-page");
       await approval.getByText("Waiting for your decision", { exact: true }).waitFor();
       await approval.getByRole("button", { name: "Allow once", exact: true }).waitFor();
@@ -132,10 +128,6 @@ export const documentScenes: DocumentScene[] = [
     visit: async (page, gateway, baseUrl) => {
       await gateway.setMethodResponse("question.get", { question: pendingQuestion() });
       await page.goto(new URL(`/ask/${questionId}`, baseUrl).href);
-      await gateway.waitForRequest("question.get", {
-        match: { id: questionId },
-        exactParams: true,
-      });
       const question = page.locator("openclaw-question-page");
       await question
         .getByRole("heading", { name: "Waiting for your answer", exact: true })
