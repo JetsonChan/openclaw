@@ -1,3 +1,4 @@
+import { resolveSessionStorePathForScope } from "../../../config/sessions/session-store-path.js";
 import type { SessionEntry } from "../../../config/sessions/types.js";
 import type { OpenClawConfig } from "../../../config/types.openclaw.js";
 import {
@@ -47,6 +48,8 @@ export async function resolveEmbeddedAttemptMemoryAudience(params: {
       sessionId: params.sessionId,
       senderIsOwner: params.senderIsOwner,
       storePath: params.admission.storePath,
+      resolveAgentStorePath: (hopAgentId) =>
+        resolveSessionStorePathForScope({ agentId: hopAgentId }, params.config),
       assertCallerCurrent: params.assertCallerCurrent,
     },
     params.admission.entry,
