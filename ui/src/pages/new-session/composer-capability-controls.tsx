@@ -10,6 +10,7 @@ import type {
   ChatComposerCapabilityMenuProps,
 } from "../chat/components/chat-composer-plus-menu.types.ts";
 import { NewSessionComposerTextareaContext } from "./composer-textarea-context.ts";
+import type { NewSessionComposerOptions } from "./composer.tsx";
 import type { NewSessionVisibility } from "./create-params.ts";
 
 registerNewSessionSetupEnglish();
@@ -115,5 +116,39 @@ export function NewSessionSelectionStatus(props: { options: NewSessionComposerCa
         })}
       </button>
     </Show>
+  );
+}
+
+export function StartControl(props: { options: NewSessionComposerOptions; onSubmit: () => void }) {
+  const label = () =>
+    props.options.submitting
+      ? t("newSession.starting")
+      : t(props.options.nativeTerminal ? "newSession.startInTerminal" : "newSession.start");
+  const reasonedBlock = () =>
+    !props.options.canSubmit && props.options.submitDisabledReason !== undefined;
+  const busy = () =>
+    props.options.submitting || props.options.attachmentDraft.reads.pendingReads > 0;
+  return (
+    <openclaw-tooltip content={props.options.submitDisabledReason ?? label()}>
+      <button
+        type="button"
+        class={[
+          "chat-send-btn new-session-page__start-submit",
+          {
+            "new-session-page__start-submit--blocked": reasonedBlock(),
+            "new-session-page__start-submit--busy": busy(),
+          },
+        ]}
+        disabled={!props.options.canSubmit && !reasonedBlock()}
+        aria-disabled={props.options.canSubmit ? "false" : "true"}
+        aria-busy={busy() ? "true" : "false"}
+        aria-label={label()}
+        onClick={() => props.onSubmit()}
+      >
+        <Icon
+          name={busy() ? "loader" : props.options.nativeTerminal ? "squareTerminal" : "arrowUp"}
+        />
+      </button>
+    </openclaw-tooltip>
   );
 }
