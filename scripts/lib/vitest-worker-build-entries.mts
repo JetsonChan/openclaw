@@ -1,6 +1,5 @@
 import { quickJsWorkerTestEntrypoint } from "../../extensions/code-mode-quickjs/src/worker-entrypoint.test-support.ts";
 import { codexCatalogPageWorkerEntrypoint } from "../../extensions/codex/catalog-page-worker-entrypoint.ts";
-import { discordAudioTestEntrypoints } from "../../extensions/discord/src/voice/audio-worker-entrypoints.test-support.ts";
 import { logbookSqliteBackendEntrypoint } from "../../extensions/logbook/src/sqlite-backend-entrypoint.test-support.ts";
 import { memoryForgetFaultEntrypoint } from "../../extensions/memory-core/src/memory-forget-fault-entrypoint.test-support.ts";
 import { memoryForgetPlanningObserverEntrypoint } from "../../extensions/memory-core/src/memory-forget-planning-observer-entrypoint.test-support.ts";
@@ -172,8 +171,6 @@ export const preservedModuleBuildSources = [
   "src/process/exec.ts",
   "src/process/spawn-broker/context.ts",
   "src/logging/subsystem.ts",
-  "extensions/matrix/src/matrix/config-update.ts",
-  "extensions/matrix/src/matrix/account-config.ts",
   "src/secrets/plugin-setup-plan.ts",
   "src/secrets/resolve.ts",
   "src/commands/sessions-cleanup.large-labels.test-support.ts",
@@ -267,7 +264,6 @@ export const preservedModuleBuildAssets = [
   "scripts/e2e/lib/upgrade-survivor/config-recipe/skills.json",
   "scripts/e2e/lib/upgrade-survivor/config-recipe/tools-tool-search.json",
   "scripts/e2e/parallels/parallels-exec.py",
-  ".github/workflows/plugin-npm-release.yml",
   "scripts/lib/vitest-worker-bootstrap.mts",
 ];
 
@@ -300,7 +296,6 @@ export const vitestWorkerBuildEntries = {
     ...Object.values(toolingNativeRuntimeEntrypoints),
     toolingProbeRuntimeEntrypoints.buildArtifactCache,
     toolingProbeRuntimeEntrypoints.buildIdentity,
-    ...Object.values(discordAudioTestEntrypoints),
     ...Object.values(realtimeAudioTestEntrypoints),
     quickJsWorkerTestEntrypoint,
     codexCatalogPageWorkerEntrypoint,
