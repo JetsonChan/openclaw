@@ -7,7 +7,6 @@ import {
   isPending,
   latest,
   Loading,
-  onCleanup,
   Show,
   untrack,
   type Accessor,
@@ -25,6 +24,7 @@ import {
   KEYBOARD_SHORTCUT_COMBOS,
   matchesShortcutCombo,
 } from "../lib/keyboard-shortcut-contract.ts";
+import { elementRef } from "../lib/reactive/element-ref.ts";
 import { t } from "../lib/reactive/i18n.ts";
 import { createParkedProjection } from "../lib/reactive/parked-projection.ts";
 import { resolveUiSessionRowAgentId } from "../lib/sessions/session-key.ts";
@@ -332,7 +332,6 @@ function PaletteSearch(props: {
                 {(item) => {
                   // Search can move a session between groups; both keys own this row.
                   const initialKey = untrack(() => `${item().category}:${item().id}`);
-                  onCleanup(() => props.optionElements.delete(initialKey));
                   const index = () => results().items.indexOf(item());
                   const active = () => index() === results().activeIndex;
                   const agentId = () =>
@@ -345,7 +344,11 @@ function PaletteSearch(props: {
                       : undefined;
                   return (
                     <div
-                      ref={(element) => props.optionElements.set(initialKey, element)}
+                      ref={elementRef((element: HTMLDivElement) => {
+                        const options = props.optionElements;
+                        options.set(initialKey, element);
+                        return () => options.delete(initialKey);
+                      })}
                       id={getOptionId(index())}
                       class={[
                         "cmd-palette__item",

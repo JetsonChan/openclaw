@@ -1,6 +1,7 @@
 import type { JSX as SolidJSX } from "@solidjs/web";
 import type { Accessor } from "solid-js";
-import { For, Show, createMemo, createSignal, onCleanup, onSettled, untrack } from "solid-js";
+import { For, Show, createMemo, createSignal, onSettled, untrack } from "solid-js";
+import { elementRef } from "../lib/reactive/element-ref.ts";
 import { createLayoutMeasurement } from "../lib/reactive/layout-measurement.ts";
 import { createShadowStyles } from "../lib/reactive/shadow-styles.ts";
 import { activeElementFor, createTabFocus, createTabList, type TabFocus } from "../lib/tabs.ts";
@@ -217,7 +218,6 @@ function TabGroupView<T extends SolidPanelTabStripTab>(
             // The keyed id is this node's lifetime identity.
             const initialTabId = untrack(() => tab().id);
             const ref = tabs.ref(initialTabId);
-            onCleanup(() => labels.delete(initialTabId));
             const selected = () => tab().id === props.activeId;
             const reorderId = () => tab().reorderId ?? tab().id;
             const draggable = () => Boolean(props.onReorder) && tab().draggable !== false;
@@ -253,7 +253,10 @@ function TabGroupView<T extends SolidPanelTabStripTab>(
                 </Show>
                 <span
                   class="tabstrip-tab__label"
-                  ref={(element) => labels.set(initialTabId, element)}
+                  ref={elementRef((element: HTMLElement) => {
+                    labels.set(initialTabId, element);
+                    return () => labels.delete(initialTabId);
+                  })}
                 >
                   {tab().label}
                 </span>

@@ -1,5 +1,5 @@
 import type { JSX } from "@solidjs/web";
-import { createProjection, createSignal, Errored, flush, lazy, Loading, onSettled } from "solid-js";
+import { createProjection, createSignal, Errored, lazy, Loading, onSettled } from "solid-js";
 import type { UiSettings } from "../../../app/settings.ts";
 import type { BoardWidgetPageMenu } from "../../../components/board/board-widget-cell-options.ts";
 import type {
@@ -245,8 +245,8 @@ function ChatHeaderSessionMenuShell(
       onBeforeShow={() => {
         openingFocus = host.ownerDocument.activeElement;
         setOpen(true);
-        // The native menu validates and focuses current entries synchronously.
-        flush();
+        // Refresh parked entries before completing the opening focus handoff.
+        onSettled(focusReady);
       }}
       onOpenChange={(isOpen) => {
         setOpen(isOpen);

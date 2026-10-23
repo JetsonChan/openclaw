@@ -1,4 +1,4 @@
-import { For, Show, createMemo, createSignal, onCleanup } from "solid-js";
+import { For, Show, createMemo, createSignal } from "solid-js";
 import { Icon } from "../../../components/solid/icon.tsx";
 import { StrokeIcon } from "../../../components/solid/stroke-icon.tsx";
 import "../../../components/tooltip.ts";
@@ -8,6 +8,7 @@ import type {
   ChatFastModeSelectValue,
 } from "../../../lib/chat/model-select-state.ts";
 import type { ChatThinkingSelectState } from "../../../lib/chat/thinking.ts";
+import { elementRef } from "../../../lib/reactive/element-ref.ts";
 import { registerEnglishCatalog, t } from "../../../lib/reactive/i18n.ts";
 import { liveValue } from "../../../lib/reactive/live-value.ts";
 import { createChatPickerOverlay } from "./chat-picker-overlay.ts";
@@ -327,22 +328,20 @@ export function ChatEffortPicker(props: ChatEffortPickerParams) {
                             {view().reasoningValueText}
                           </span>
                           <For each={view().sliderStops} keyed={(stop) => stop.value}>
-                            {(stop, index) => {
-                              let label: HTMLSpanElement;
-                              onCleanup(() => previewLabels.delete(label));
-                              return (
-                                <span
-                                  ref={(element) => {
-                                    label = element;
+                            {(stop, index) => (
+                              <span
+                                ref={[
+                                  elementRef<HTMLSpanElement>((element) => {
                                     previewLabels.add(element);
-                                  }}
-                                  data-chat-thinking-preview-index={index()}
-                                  hidden
-                                >
-                                  {formatEffortLabel(stop().label)}
-                                </span>
-                              );
-                            }}
+                                    return () => previewLabels.delete(element);
+                                  }),
+                                ]}
+                                data-chat-thinking-preview-index={index()}
+                                hidden
+                              >
+                                {formatEffortLabel(stop().label)}
+                              </span>
+                            )}
                           </For>
                         </span>
                       </div>
@@ -460,39 +459,37 @@ export function ChatEffortPicker(props: ChatEffortPickerParams) {
                         onKeyDown={onSpeedKeyDown}
                       >
                         <For each={view().speedOptions} keyed={(option) => option.value}>
-                          {(option, index) => {
-                            let button: HTMLButtonElement;
-                            onCleanup(() => speedButtons.delete(button));
-                            return (
-                              <button
-                                ref={(element) => {
-                                  button = element;
+                          {(option, index) => (
+                            <button
+                              ref={[
+                                elementRef<HTMLButtonElement>((element) => {
                                   speedButtons.add(element);
-                                }}
-                                type="button"
-                                role="radio"
-                                class="chat-controls__speed-option"
-                                data-chat-speed-option={option().value}
-                                aria-checked={
-                                  option().value === view().selectedSpeed ? "true" : "false"
+                                  return () => speedButtons.delete(element);
+                                }),
+                              ]}
+                              type="button"
+                              role="radio"
+                              class="chat-controls__speed-option"
+                              data-chat-speed-option={option().value}
+                              aria-checked={
+                                option().value === view().selectedSpeed ? "true" : "false"
+                              }
+                              tabindex={index() === view().tabbableSpeedIndex ? 0 : -1}
+                              disabled={props.fastMode.disabled || option().disabled}
+                              onClick={(event: MouseEvent) => {
+                                event.stopPropagation();
+                                if (
+                                  !props.fastMode.disabled &&
+                                  !option().disabled &&
+                                  option().value !== props.fastMode.persistedOverride
+                                ) {
+                                  void props.onFastModeSelect(option().value, props.sessionKey);
                                 }
-                                tabindex={index() === view().tabbableSpeedIndex ? 0 : -1}
-                                disabled={props.fastMode.disabled || option().disabled}
-                                onClick={(event: MouseEvent) => {
-                                  event.stopPropagation();
-                                  if (
-                                    !props.fastMode.disabled &&
-                                    !option().disabled &&
-                                    option().value !== props.fastMode.persistedOverride
-                                  ) {
-                                    void props.onFastModeSelect(option().value, props.sessionKey);
-                                  }
-                                }}
-                              >
-                                {option().label}
-                              </button>
-                            );
-                          }}
+                              }}
+                            >
+                              {option().label}
+                            </button>
+                          )}
                         </For>
                       </div>
                     </div>

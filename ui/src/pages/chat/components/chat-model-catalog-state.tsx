@@ -1,4 +1,4 @@
-import { createMemo, onCleanup, Show } from "solid-js";
+import { createMemo, onSettled, Show } from "solid-js";
 import { providerDisplayLabel } from "../../../components/provider-icon-data.ts";
 import { Icon } from "../../../components/solid/icon.tsx";
 import "../../../components/tooltip.ts";
@@ -28,7 +28,7 @@ export function ChatModelCatalogRefresh(props: { state: ModelCatalogState | unde
     <Show when={label()}>
       {(text) => {
         let indicator: HTMLSpanElement | undefined;
-        onCleanup(() => {
+        onSettled(() => () => {
           // Capture focus before this disappearing control is removed from the DOM.
           if (indicator?.contains(indicator.ownerDocument.activeElement)) {
             restoreChatModelRefreshFocus(

@@ -1,10 +1,11 @@
-import { createEffect, createMemo, createSignal, onCleanup, onSettled } from "solid-js";
+import { createEffect, createMemo, createSignal, onSettled } from "solid-js";
 import {
   isStaleChunkImportError,
   retryControlUiImport,
   retryStaleChunkReloadWhenReachable,
 } from "../../app/stale-chunk-reload.ts";
 import { shouldHandleNavigationClick } from "../../lib/navigation-click.ts";
+import { elementRef } from "../../lib/reactive/element-ref.ts";
 import type { Overlay } from "../overlay-lifecycle.ts";
 import { containsComposed } from "../overlay-registry.ts";
 import { MENU_FORM_CONTROL_SELECTOR } from "./menu-form-controls.ts";
@@ -237,18 +238,10 @@ export function useMenuMachine(
     runtime: current,
     items,
     itemRef() {
-      let item: HTMLElement | undefined;
-      onCleanup(() => {
-        if (item) {
-          itemNodes.delete(item);
-        }
+      return elementRef((element: HTMLElement) => {
+        itemNodes.add(element);
+        return () => itemNodes.delete(element);
       });
-      return (element) => {
-        if (item) {
-          itemNodes.delete(item);
-        }
-        itemNodes.add((item = element));
-      };
     },
     highlightedValue: () => current()?.read().highlightedValue ?? null,
     highlightedValueNow: () => runtime?.service.context.get("highlightedValue") ?? null,

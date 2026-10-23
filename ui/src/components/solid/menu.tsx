@@ -1,6 +1,7 @@
 import { dynamic, type JSX } from "@solidjs/web";
-import { For, Show, createMemo, onCleanup, onSettled, untrack, merge } from "solid-js";
+import { For, Show, createMemo, onSettled, untrack, merge } from "solid-js";
 import { acquireNativeOverlaySurface } from "../../lib/native-overlay-occlusion.ts";
+import { elementRef } from "../../lib/reactive/element-ref.ts";
 import { createAnchoredOverlay } from "../../lib/reactive/overlay-anchor.ts";
 import { projectOwner } from "../../lib/reactive/projection.ts";
 import { registerMenuShortcuts } from "../menu-shortcuts.ts";
@@ -106,18 +107,10 @@ export function createMenuControls(): MenuControls {
   return {
     elements,
     ref() {
-      let current: HTMLElement | undefined;
-      onCleanup(() => {
-        if (current) {
-          elements.delete(current);
-        }
+      return elementRef((element: HTMLElement) => {
+        elements.add(element);
+        return () => elements.delete(element);
       });
-      return (element) => {
-        if (current) {
-          elements.delete(current);
-        }
-        elements.add((current = element));
-      };
     },
   };
 }
