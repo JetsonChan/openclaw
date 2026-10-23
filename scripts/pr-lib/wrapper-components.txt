@@ -2659,6 +2659,7 @@ src/plugins/api-lifecycle.ts
 src/plugins/cli-backend-registration.ts
 src/plugins/cli-backends.runtime.ts
 src/plugins/cli-callback-binding.ts
+src/plugins/inline-view.ts
 src/plugins/service-scheduler-binding.ts
 src/plugins/setup-registry.ts
 src/shared/map-nested-strings.ts
