@@ -25,7 +25,12 @@ describe("channel responsePrefix config admission", () => {
         }
         for (const value of values) {
           expect(
-            validateJsonSchemaValue({ cacheKey: `response-prefix.${channelId}`, schema, value }).ok,
+            validateJsonSchemaValue({
+              cacheKey: `response-prefix.${channelId}`,
+              schema,
+              value,
+              applyDefaults: true,
+            }).ok,
           ).toBe(typeof responsePrefix === "string");
         }
       }

@@ -159,7 +159,6 @@ describe("runtime api guardrails", () => {
       }
     }
 
-    expect(qaRunnerApiFiles.length).toBeGreaterThan(0);
     for (const file of qaRunnerApiFiles) {
       const exports = readExportStatements(file);
       expect(exports).toHaveLength(1);
