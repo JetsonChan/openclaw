@@ -128,7 +128,7 @@ function ModelReadiness(props: ModelProvidersViewProps) {
 
 function renderProviderNoticeRow(text: string) {
   return (
-    <div class="settings-row">
+    <div class="settings-row" role="alert">
       <div class="settings-row__text">
         <span class="settings-row__desc provider-usage__error">{text}</span>
       </div>
