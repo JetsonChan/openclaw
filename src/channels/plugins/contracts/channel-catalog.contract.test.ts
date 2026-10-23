@@ -9,51 +9,51 @@ import {
 } from "./test-helpers/channel-catalog-contract.js";
 
 describeChannelCatalogEntryContract({
-  channelId: "msteams",
-  npmSpec: "@openclaw/msteams",
-  alias: "teams",
+  channelId: "imessage",
+  npmSpec: "@openclaw/imessage",
+  alias: "imsg",
 });
 
-const whatsappMeta = {
-  id: "whatsapp",
-  label: "WhatsApp",
-  selectionLabel: "WhatsApp (QR link)",
-  detailLabel: "WhatsApp Web",
-  docsPath: "/channels/whatsapp",
-  blurb: "works with your own number; recommend a separate phone + eSIM.",
+const imessageMeta = {
+  id: "imessage",
+  label: "iMessage",
+  selectionLabel: "iMessage (imsg)",
+  detailLabel: "iMessage",
+  docsPath: "/channels/imessage",
+  blurb: "Local iMessage/SMS through the imsg bridge, including private API message actions when enabled.",
 };
 
-const whatsappPackageJson = JSON.parse(
-  fs.readFileSync(path.join(process.cwd(), "extensions", "whatsapp", "package.json"), "utf8"),
+const imessagePackageJson = JSON.parse(
+  fs.readFileSync(path.join(process.cwd(), "extensions", "imessage", "package.json"), "utf8"),
 ) as {
   name?: string;
   version?: string;
   openclaw?: { install?: { npmSpec?: string } };
 };
-const whatsappNpmSpec = whatsappPackageJson.openclaw?.install?.npmSpec ?? whatsappPackageJson.name;
-const whatsappVersion = whatsappPackageJson.version;
-if (!whatsappNpmSpec || !whatsappVersion) {
-  throw new Error("missing package metadata for whatsapp");
+const imessageNpmSpec = imessagePackageJson.openclaw?.install?.npmSpec ?? imessagePackageJson.name;
+const imessageVersion = imessagePackageJson.version;
+if (!imessageNpmSpec || !imessageVersion) {
+  throw new Error("missing package metadata for imessage");
 }
-const whatsappOfficialFallbackNpmSpec = isPrereleaseSemverVersion(whatsappVersion)
-  ? `${whatsappNpmSpec}@${whatsappVersion}`
-  : whatsappNpmSpec;
+const imessageOfficialFallbackNpmSpec = isPrereleaseSemverVersion(imessageVersion)
+  ? `${imessageNpmSpec}@${imessageVersion}`
+  : imessageNpmSpec;
 
 describeBundledMetadataOnlyChannelCatalogContract({
-  pluginId: "whatsapp",
-  packageName: "@openclaw/whatsapp",
-  npmSpec: "@openclaw/whatsapp",
-  meta: whatsappMeta,
+  pluginId: "imessage",
+  packageName: "@openclaw/imessage",
+  npmSpec: "@openclaw/imessage",
+  meta: imessageMeta,
   defaultChoice: "npm",
 });
 
 describeOfficialFallbackChannelCatalogContract({
-  channelId: "whatsapp",
-  npmSpec: whatsappOfficialFallbackNpmSpec,
-  meta: whatsappMeta,
-  packageName: "@openclaw/whatsapp",
-  externalNpmSpec: "@vendor/whatsapp-fork",
-  externalLabel: "WhatsApp Fork",
+  channelId: "imessage",
+  npmSpec: imessageOfficialFallbackNpmSpec,
+  meta: imessageMeta,
+  packageName: "@openclaw/imessage",
+  externalNpmSpec: "@vendor/imessage-fork",
+  externalLabel: "iMessage Fork",
 });
 
 describeChannelCatalogEntryContract({
