@@ -234,10 +234,11 @@ describe("unit-fast vitest lane", () => {
     const stateful = "src/hooks/stateful.test.ts";
     const quoted = "src/hooks/quoted-[é].test.ts";
     const ignored = "src/hooks/ignored.test.ts";
+    const otherRoots = ["packages/memory-host-sdk/src/pure.test.ts", "test/pure.test.ts"];
     const moduleUrl = (file: string) => JSON.stringify(pathToFileURL(path.resolve(file)).href);
-    fs.mkdirSync(path.join(cwd, "src/hooks"), { recursive: true });
     fs.writeFileSync(path.join(cwd, ".gitignore"), `${ignored}\n`);
-    for (const file of [pure, quoted, ignored]) {
+    for (const file of [pure, quoted, ignored, ...otherRoots]) {
+      fs.mkdirSync(path.dirname(path.join(cwd, file)), { recursive: true });
       fs.writeFileSync(path.join(cwd, file), pureTest);
     }
     for (const [file, helper, name] of [
@@ -297,7 +298,7 @@ describe("unit-fast vitest lane", () => {
     );
     expect(result.status, result.stderr).toBe(0);
     expect(JSON.parse(result.stdout)).toEqual({
-      inventory: [harness, mockHelper, pure, quoted, stateful],
+      inventory: [...otherRoots, harness, mockHelper, pure, quoted, stateful].toSorted(),
       isolated: [harness, mockHelper, stateful],
       runs: [
         { config: "test/vitest/vitest.unit-fast.config.ts", include: [pure] },

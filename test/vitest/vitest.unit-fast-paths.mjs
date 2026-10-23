@@ -370,10 +370,10 @@ function collectRepoTestFiles(cwd, selected) {
   }
   const roots = ["src/", "packages/", "test/"];
   let inventory = new Set();
-  // Full unit discovery needs only these roots. Separate pathspecs also let Git
-  // avoid checking deleted-file metadata elsewhere in the repository.
-  for (const scope of selected ? [selected] : roots.map((root) => [root])) {
-    const files = getRepositoryFileInventory(cwd, scope);
+  // A single glob per root filters non-test files before Git checks deleted-file
+  // metadata, while retaining untracked tests and each root's directory prefix.
+  for (const scope of selected ? [selected] : roots.map((root) => [`${root}**/*.test.ts`])) {
+    const files = getRepositoryFileInventory(cwd, scope, selected ? "literal" : "glob");
     if (!files) {
       inventory = null;
       break;

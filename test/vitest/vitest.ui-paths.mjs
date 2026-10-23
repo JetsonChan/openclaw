@@ -7,10 +7,11 @@ const repoRoot = fileURLToPath(new URL("../../", import.meta.url));
 const inventories = new Map();
 
 // Share one process snapshot across UI ownership and fast-lane discovery.
-export function getRepositoryFileInventory(directory, selected) {
+/** @param {"literal" | "glob"} [pathspecMode] */
+export function getRepositoryFileInventory(directory, selected, pathspecMode = "literal") {
   const cwd = resolve(directory ?? repoRoot);
-  const key = JSON.stringify([cwd, selected]);
-  const fullInventory = JSON.stringify([cwd, undefined]);
+  const key = JSON.stringify([cwd, selected, pathspecMode]);
+  const fullInventory = JSON.stringify([cwd, undefined, "literal"]);
   if (selected && inventories.has(fullInventory)) {
     return inventories.get(fullInventory);
   }
@@ -27,7 +28,7 @@ export function getRepositoryFileInventory(directory, selected) {
         "--exclude-standard",
         "-t",
         "-z",
-        ...(selected ? ["--", ...selected.map((file) => `:(literal)${file}`)] : []),
+        ...(selected ? ["--", ...selected.map((file) => `:(${pathspecMode})${file}`)] : []),
       ],
       {
         cwd,
