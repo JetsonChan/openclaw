@@ -44,11 +44,12 @@ jobs:
 
   build:
     name: Selected build and package composition
-    needs: static
     runs-on: ubuntu-latest
     timeout-minutes: 90
     steps:
       - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
       - name: Install the pinned toolchain and frozen dependencies
         uses: ./.github/actions/setup-node-env
         with:
