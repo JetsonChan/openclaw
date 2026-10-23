@@ -2955,11 +2955,6 @@ html[dir="rtl"] .chat-attachment-loading > span {
   color: var(--accent);
 }
 
-.chat-controls__speed-option:focus-visible {
-  outline: 2px solid var(--accent);
-  outline-offset: 1px;
-}
-
 .chat-controls__speed-option:disabled {
   opacity: 0.55;
 }
@@ -3507,7 +3502,8 @@ html[dir="rtl"] .chat-attachment-loading > span {
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .agent-chat__welcome-secondary {
+  .agent-chat__welcome-secondary,
+  .sidebar-markdown-reader {
     transition: none;
   }
 }
