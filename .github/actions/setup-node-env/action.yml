@@ -274,7 +274,6 @@ runs:
           ui/node_modules
           packages/*/node_modules
           extensions/*/node_modules
-          examples/*/node_modules
           .cache/openclaw-pnpm-store
         key: ${{ steps.dependency-cache-key.outputs.key }}
 

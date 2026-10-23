@@ -32,12 +32,14 @@ jobs:
       - name: Install the pinned toolchain and frozen dependencies
         uses: ./.github/actions/setup-node-env
         with:
+          cache-mode: off
           install-bun: "false"
       - run: pnpm config:channels:check
       - run: pnpm channels:catalog:check
       - run: pnpm tsgo:core
       - run: pnpm tsgo:extensions
       - run: pnpm test test/scripts/bundled-plugin-assets.test.ts test/scripts/native-protocol-artifact.test.ts packages/gateway-protocol/src/native-protocol-levels.guard.test.ts --maxWorkers=1
+      - run: pnpm test test/scripts/ci-workflow-guards.test.ts test/scripts/ancillary-workflow-concurrency.test.ts test/scripts/ci-workflow-cost.test.ts test/scripts/ci-workflow-evidence.test.ts test/scripts/ci-workflow-planning.test.ts test/scripts/ci-workflow-native-generated.test.ts --maxWorkers=1
       - run: pnpm test:contracts:channels
       - run: pnpm test:contracts:plugins
       - run: pnpm test:extension imessage
@@ -50,9 +52,12 @@ jobs:
     timeout-minutes: 90
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
       - name: Install the pinned toolchain and frozen dependencies
         uses: ./.github/actions/setup-node-env
         with:
+          cache-mode: off
           install-bun: "false"
       - run: pnpm build
       - name: Compose the selected package

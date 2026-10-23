@@ -1,6 +1,4 @@
 name: macOS Periphery Dead Code
-# Job conclusions cannot distinguish passive draft events from scope loss.
-# Record source admission for the commenter before either job runs.
 run-name: ${{ github.workflow }} [${{ github.event_name == 'workflow_dispatch' && 'manual' || github.event.pull_request.draft == false && 'report' || github.event.action == 'converted_to_draft' && 'draft' || 'passive' }}]
 
 on:
@@ -63,7 +61,6 @@ jobs:
               "--",
               "apps/macos/",
               ".github/workflows/macos-periphery.yml",
-              ".github/workflows/ios-periphery-comment.yml",
               "apps/macos/.periphery.yml",
               "scripts/install-periphery.sh",
               "scripts/lib/swift-toolchain.sh",
@@ -77,7 +74,7 @@ jobs:
     name: Scan macOS dead code
     needs: scope
     if: ${{ needs.scope.outputs.should-scan == 'true' }}
-    runs-on: xcode-27
+    runs-on: macos-26-intel
     timeout-minutes: 45
     steps:
       - name: Checkout
@@ -219,7 +216,7 @@ jobs:
             summary = [
               "### macOS Periphery",
               "",
-              `Found ${rows.length} dead Swift code ${rows.length === 1 ? "symbol" : "symbols"}. See the PR comment or workflow artifact for details.`,
+              `Found ${rows.length} dead Swift code ${rows.length === 1 ? "symbol" : "symbols"}. See the workflow artifact for details.`,
             ].join("\n");
           } else {
             summary = [

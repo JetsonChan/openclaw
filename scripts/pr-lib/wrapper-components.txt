@@ -1,4 +1,3 @@
-.github/workflows/pr-crabbox-gate-publisher.yml
 cli-root-options.mjs
 config/ci-test-timings.json
 node-compile-cache.mjs

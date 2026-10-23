@@ -4,7 +4,6 @@ packages:
   - packages/*
   - extensions/*
   - "!extensions/qa-lab"
-  - examples/*
 
 minimumReleaseAge: 10080
 minimumReleaseAgeStrict: true
