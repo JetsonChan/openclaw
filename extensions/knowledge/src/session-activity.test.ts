@@ -142,6 +142,9 @@ it("accepted write captures original session before recovery, and commits exactl
 it("activity filters current eligibility before pagination and keeps partitions isolated", () => {
   const db = new DatabaseSync(":memory:");
   try {
+    db.exec(`CREATE TABLE session_activity (sequence INTEGER PRIMARY KEY, scope TEXT, agent_id TEXT,
+      session_key TEXT, session_id TEXT, call_id TEXT, operation TEXT, action TEXT, at TEXT, record_id TEXT,
+      revision INTEGER, UNIQUE(scope,agent_id,session_id,call_id,operation,action,record_id,revision))`);
     const active = [{ id: "a", title: "Visible", kind: "page", type: "note", revision: 1 }];
     const o = origin();
     for (let i = 0; i < 205; i++) {

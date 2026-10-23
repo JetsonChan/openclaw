@@ -1,5 +1,3 @@
-import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
-import path from "node:path";
 import type { PluginServiceSchedulerV1 } from "openclaw/plugin-sdk/plugin-entry";
 import { Check } from "typebox/value";
 import { nextRun, parseCron, type Cron } from "./cron.js";
@@ -23,8 +21,8 @@ const CATCH_UP_DELAY_MS = 60_000;
  * Plugin-owned scheduled maintenance (SPEC §11). Uses the host service
  * scheduler; there is no job store or queue. One pass visits every
  * operator-defined store and partition; one failing store never stops the
- * others. The last pass and the next slot persist under the Knowledge state
- * root so a pass missed while the Gateway was down runs after restart.
+ * others. The last pass and the next slot persist in the store registry so a
+ * pass missed while the Gateway was down runs after restart.
  */
 export class Maintenance {
   private cron?: Cron;
@@ -43,14 +41,6 @@ export class Maintenance {
       // SAFETY: parseCron throws only Error objects.
       this.configError = (e as Error).message;
     }
-  }
-  /** Resolved lazily: registration must not read the host runtime. */
-  private get file() {
-    return path.join(
-      this.stores.api.runtime.state.resolveStateDir(),
-      "knowledge",
-      "maintenance.json",
-    );
   }
   private get active() {
     return (
@@ -219,8 +209,8 @@ export class Maintenance {
 
   private async load(): Promise<State> {
     try {
-      // SAFETY: each State field is validated below before use; a non-object throws into the catch.
-      const raw = JSON.parse(await readFile(this.file, "utf8")) as State;
+      // SAFETY: each State field is validated below before use; null or a non-object throws into the catch.
+      const raw = (await this.stores.registry.call("maintenance")) as State;
       return {
         ...(typeof raw.nextRunAt === "number" ? { nextRunAt: raw.nextRunAt } : {}),
         ...(raw.lastRun && Check(MaintenanceRun, raw.lastRun) ? { lastRun: raw.lastRun } : {}),
@@ -229,10 +219,13 @@ export class Maintenance {
       return {};
     }
   }
+  /** Best effort: an unrecorded slot only costs a catch-up pass after restart. */
   private async save() {
-    await mkdir(path.dirname(this.file), { recursive: true, mode: 0o700 });
-    const temporary = `${this.file}.${process.pid}.tmp`;
-    await writeFile(temporary, JSON.stringify(this.state), { mode: 0o600 });
-    await rename(temporary, this.file);
+    try {
+      await this.stores.registry.call("maintenance", this.state);
+    } catch (e) {
+      // SAFETY: registry calls reject only with Error objects.
+      this.log.warn(`Knowledge maintenance schedule was not recorded: ${(e as Error).message}`);
+    }
   }
 }

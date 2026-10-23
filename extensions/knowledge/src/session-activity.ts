@@ -49,17 +49,6 @@ export const SessionActivityOutput = Type.Object(
 export type ActivityInput = Static<typeof SessionActivityInput>;
 export type ActivityOutput = Static<typeof SessionActivityOutput>;
 
-// Additive operational table: no vault Markdown changes and no old-schema downgrade.
-function ensureActivity(db: DatabaseSync) {
-  db.exec(`CREATE TABLE IF NOT EXISTS session_activity (
-    sequence INTEGER PRIMARY KEY, scope TEXT NOT NULL, agent_id TEXT NOT NULL,
-    session_key TEXT NOT NULL, session_id TEXT NOT NULL, call_id TEXT NOT NULL,
-    operation TEXT NOT NULL, action TEXT NOT NULL, at TEXT NOT NULL,
-    record_id TEXT NOT NULL, revision INTEGER NOT NULL,
-    UNIQUE(scope,agent_id,session_id,call_id,operation,action,record_id,revision)
-  ) STRICT;
-  CREATE INDEX IF NOT EXISTS session_activity_session ON session_activity(scope,agent_id,session_key,session_id,sequence);`);
-}
 export function appendActivity(
   db: DatabaseSync,
   scope: string,
@@ -68,7 +57,6 @@ export function appendActivity(
   action: "read" | "write",
   records: { id: string; revision: number }[],
 ) {
-  ensureActivity(db);
   // Retried tool calls record each record revision once.
   const insert = db.prepare(`INSERT INTO session_activity
     (scope,agent_id,session_key,session_id,call_id,operation,action,at,record_id,revision) VALUES (?,?,?,?,?,?,?,?,?,?)
@@ -95,7 +83,6 @@ export function sessionActivity(
   active: LoadedRecord[],
   input: ActivityInput,
 ): ActivityOutput {
-  ensureActivity(db);
   const args = [scope, agent, input.sessionKey, input.sessionId];
   const upper =
     input.upper ??

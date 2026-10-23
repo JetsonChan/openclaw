@@ -148,9 +148,8 @@ Knowledge keeps all state under the Gateway state directory
 
 ```text
 <state dir>/knowledge/
-  registry.sqlite       # store identities and agent bindings
+  registry.sqlite       # store identities, agent bindings, maintenance schedule
   registry.id           # registry sentinel
-  maintenance.json      # maintenance schedule state and last results
   stores/<vaultId>/
     state.sqlite        # journal, history, search index, Git queue
     vault/              # Markdown records, retained evidence, local .git

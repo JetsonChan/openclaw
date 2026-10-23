@@ -34,9 +34,6 @@ const normalize = (value: string) =>
 /** Operational safeguards, NOT a rebuildable projection. Observing withdrawal is irreversible here. */
 export function observeWithdrawals(db: DatabaseSync, records: LoadedRecord[], binding: string) {
   observeLifecycleGuards(db, records, binding);
-  db.exec(
-    "CREATE TABLE IF NOT EXISTS keyword_withdrawals_v1 (binding TEXT NOT NULL, id TEXT NOT NULL, PRIMARY KEY(binding,id)) STRICT",
-  );
   const insert = prepareSqliteQuerySync<{ id: string }>(db, (param) =>
     getNodeSqliteKysely<StorageTables>(db)
       .insertInto("keyword_withdrawals_v1")
@@ -272,9 +269,6 @@ function reconcileKeywordIndex(
       data.ontology?.fingerprint,
       records.map((r) => [r.id, r.path, r.hash, r.revision]),
     ]),
-  );
-  db.exec(
-    "CREATE TABLE IF NOT EXISTS keyword_state_v1 (binding TEXT PRIMARY KEY, snapshot TEXT NOT NULL, indexed_at TEXT NOT NULL) STRICT",
   );
   const tracked = tableExists(db, rows);
   db.exec(

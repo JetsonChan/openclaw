@@ -643,7 +643,9 @@ it("verification reports unavailable index instead of a false pass", async () =>
   const f = await batchFixture(),
     receipt = await f.service.publish_batch(f.input as any, f.owner);
   // A malformed projection is not authoritative data; verification must report failure.
-  f.store.withDatabase((db) => db.exec("CREATE TABLE keyword_state_v1 (wrong TEXT)"));
+  f.store.withDatabase((db) =>
+    db.exec("DROP TABLE keyword_state_v1; CREATE TABLE keyword_state_v1 (wrong TEXT)"),
+  );
   const checked = await f.service.verify(verifyInput(receipt), f.owner);
   expect(checked.index).toBe("unavailable");
   expect(checked.failed).toBe(4);

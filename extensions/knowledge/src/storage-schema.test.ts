@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import { copyFile, rename } from "node:fs/promises";
 import path from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { expect, it } from "vitest";
@@ -89,9 +90,15 @@ it.each([1, 2, 3, 4, 5])(
       "git_jobs",
       "history",
       "identities",
+      "keyword_state_v1",
+      "keyword_withdrawals_v1",
       "knowledge_schema",
+      "lifecycle_guards_v1",
       "mutations",
       "observations",
+      "recent_records_v1",
+      "recent_requests_v1",
+      "session_activity",
     ]);
   },
 );
@@ -123,14 +130,45 @@ it("a database that is not a current Knowledge state store is refused", async ()
     "identity checkpoint unavailable",
   );
 
+  // Admission runs once per physical database per thread, so a newer release's
+  // store is written without admitting it here first.
   const newer = path.join(dir, "newer.sqlite");
-  await new SqliteIdentityStore(newer).lookup("store:x");
+  legacyState(newer, 5, manifest());
   const stamped = new DatabaseSync(newer);
-  stamped.exec("UPDATE knowledge_schema SET version=6");
+  stamped.exec(
+    "CREATE TABLE knowledge_schema (store TEXT PRIMARY KEY, version INTEGER NOT NULL) STRICT; INSERT INTO knowledge_schema VALUES ('state', 6);",
+  );
   stamped.close();
   await expect(new SqliteIdentityStore(newer).lookup("store:x")).rejects.toThrow(
     "identity checkpoint unavailable",
   );
+});
+
+it("schema and tables are admitted once per physical database; a replaced file is admitted again", async () => {
+  const dir = tempDirs.make("knowledge-schema-"),
+    file = path.join(dir, "state.sqlite");
+  const store = new SqliteIdentityStore(file);
+  await store.lookup("store:x");
+  const indexes = () => {
+    const db = new DatabaseSync(file);
+    try {
+      return db.prepare("SELECT 1 FROM pragma_index_list('history')").all().length;
+    } finally {
+      db.close();
+    }
+  };
+  const admittedIndexes = indexes();
+  const db = new DatabaseSync(file);
+  db.exec("DROP INDEX history_scope_sequence");
+  db.close();
+  // A warm connection to the same file repeats no admission work.
+  await store.lookup("store:x");
+  expect(indexes()).toBe(admittedIndexes - 1);
+  // A restored copy is a different physical database and is admitted on first use.
+  await copyFile(file, path.join(dir, "restored.sqlite"));
+  await rename(path.join(dir, "restored.sqlite"), file);
+  await store.lookup("store:x");
+  expect(indexes()).toBe(admittedIndexes);
 });
 
 it("a registry written by an earlier release opens, and a foreign database is refused", () => {

@@ -1,4 +1,12 @@
-import { constants, closeSync, fsyncSync, lstatSync, openSync, realpathSync } from "node:fs";
+import {
+  constants,
+  closeSync,
+  fsyncSync,
+  lstatSync,
+  openSync,
+  realpathSync,
+  statSync,
+} from "node:fs";
 import path from "node:path";
 import type { DatabaseSync } from "node:sqlite";
 import {
@@ -25,8 +33,11 @@ const unavailable = () =>
   );
 
 /** Operational database schema. A store written before version stamping is
- * dated by its tables; only a database this call just created may be empty. */
-const stateSchema = (created: boolean): KnowledgeSchema => ({
+ * dated by its tables; only a zero-byte file is new. In rollback-journal mode
+ * a database stays zero bytes until its first commit, and a crash during that
+ * commit is rolled back before `detect` runs under the write lock, so an
+ * interrupted initialization resumes while a foreign database is refused. */
+const stateSchema = (filename: string): KnowledgeSchema => ({
   store: "state",
   steps: [
     {
@@ -82,7 +93,7 @@ const stateSchema = (created: boolean): KnowledgeSchema => ({
   ],
   detect: (db) => {
     if (!tableExists(db, "identities")) {
-      return created ? 0 : undefined;
+      return statSync(filename).size === 0 ? 0 : undefined;
     }
     if (!tableExists(db, "mutations")) {
       return 1;
@@ -97,7 +108,47 @@ const stateSchema = (created: boolean): KnowledgeSchema => ({
   },
 });
 
-/** Short-lived connections: no native handles survive a query or plugin reload. */
+// Additive operational tables and indexes outside the versioned schema, so
+// older plugin versions keep opening the store and ignore what they do not use.
+// Lifecycle guards and keyword withdrawals are durable safeguards; keyword
+// state, the recent_* projection and session activity are derived caches their
+// readers repair. Per-binding FTS tables are created by keyword search, since
+// their names depend on the binding. The activity projection joins exact
+// publication snapshots to history; without history_record_snapshot every
+// published record scans the entire history table again. Per-record
+// latest-writer lookups need (scope,id,sequence); otherwise the planner walks
+// the scope's whole history backwards for each record.
+function installAdditiveTables(db: DatabaseSync): void {
+  db.exec(`CREATE INDEX IF NOT EXISTS history_record_snapshot ON history(scope,id,hash,revision,provenance,sequence);
+    CREATE INDEX IF NOT EXISTS history_scope_sequence ON history(scope,sequence);
+    CREATE INDEX IF NOT EXISTS history_record_sequence ON history(scope,id,sequence);
+    CREATE TABLE IF NOT EXISTS lifecycle_guards_v1 (binding TEXT NOT NULL, id TEXT NOT NULL, lifecycle TEXT NOT NULL, metadata TEXT NOT NULL, PRIMARY KEY(binding,id)) STRICT;
+    CREATE TABLE IF NOT EXISTS keyword_withdrawals_v1 (binding TEXT NOT NULL, id TEXT NOT NULL, PRIMARY KEY(binding,id)) STRICT;
+    CREATE TABLE IF NOT EXISTS keyword_state_v1 (binding TEXT PRIMARY KEY, snapshot TEXT NOT NULL, indexed_at TEXT NOT NULL) STRICT;
+    CREATE TABLE IF NOT EXISTS recent_requests_v1 (
+      scope TEXT NOT NULL, request TEXT NOT NULL, operation TEXT, target_id TEXT, at TEXT, reason TEXT, replacement_id TEXT,
+      PRIMARY KEY(scope,request)
+    );
+    CREATE TABLE IF NOT EXISTS recent_records_v1 (
+      scope TEXT NOT NULL, request TEXT NOT NULL, ordinal INTEGER NOT NULL, id TEXT, hash TEXT, revision, actor TEXT, kind TEXT, type TEXT, title TEXT,
+      PRIMARY KEY(scope,request,ordinal)
+    );
+    CREATE TABLE IF NOT EXISTS session_activity (
+      sequence INTEGER PRIMARY KEY, scope TEXT NOT NULL, agent_id TEXT NOT NULL,
+      session_key TEXT NOT NULL, session_id TEXT NOT NULL, call_id TEXT NOT NULL,
+      operation TEXT NOT NULL, action TEXT NOT NULL, at TEXT NOT NULL,
+      record_id TEXT NOT NULL, revision INTEGER NOT NULL,
+      UNIQUE(scope,agent_id,session_id,call_id,operation,action,record_id,revision)
+    ) STRICT;
+    CREATE INDEX IF NOT EXISTS session_activity_session ON session_activity(scope,agent_id,session_key,session_id,sequence);`);
+}
+
+/** Physical databases (device:inode) this thread has admitted. */
+const admitted = new Set<string>();
+
+/** Short-lived connections: no native handles survive a query or plugin reload.
+ * Schema, index and table checks run once per physical database per thread,
+ * not per connection. */
 export class SqliteIdentityStore implements IdentityStore {
   constructor(private readonly filename: string) {}
   withDatabase<T>(run: (db: DatabaseSync) => T): T {
@@ -131,31 +182,34 @@ export class SqliteIdentityStore implements IdentityStore {
       if (before.dev !== after.dev || before.ino !== after.ino || after.nlink !== 1) {
         throw unavailable();
       }
-      try {
-        ensureKnowledgeSchema(db, stateSchema(created));
-      } catch (e) {
-        throw e instanceof UnrecognizedSchema ? unavailable() : e;
+      // A replaced or restored file has a new inode and is admitted again.
+      const physical = `${after.dev}:${after.ino}`;
+      if (created || !admitted.has(physical)) {
+        this.admit(db, created);
+        admitted.add(physical);
       }
-      if (created) {
-        const parent = openSync(path.dirname(this.filename), constants.O_RDONLY);
-        try {
-          fsyncSync(parent);
-        } finally {
-          closeSync(parent);
-        }
-      }
-      // Additive indexes remain readable by older plugin versions. The activity
-      // projection joins exact publication snapshots to history; without this
-      // key every published record scans the entire history table again.
-      // Per-record latest-writer lookups need (scope,id,sequence); otherwise the
-      // planner walks the scope's whole history backwards for each record.
-      db.exec(`CREATE INDEX IF NOT EXISTS history_record_snapshot ON history(scope,id,hash,revision,provenance,sequence);
-        CREATE INDEX IF NOT EXISTS history_scope_sequence ON history(scope,sequence);
-        CREATE INDEX IF NOT EXISTS history_record_sequence ON history(scope,id,sequence);`);
       return run(db);
     } finally {
       db.close();
     }
+  }
+  // Bring one physical database to the current schema, indexes and tables.
+  // Each statement commits on its own, so admission never rolls back with run().
+  private admit(db: DatabaseSync, created: boolean) {
+    try {
+      ensureKnowledgeSchema(db, stateSchema(this.filename));
+    } catch (e) {
+      throw e instanceof UnrecognizedSchema ? unavailable() : e;
+    }
+    if (created) {
+      const parent = openSync(path.dirname(this.filename), constants.O_RDONLY);
+      try {
+        fsyncSync(parent);
+      } finally {
+        closeSync(parent);
+      }
+    }
+    installAdditiveTables(db);
   }
   async lookup(key: string): Promise<Manifest | undefined> {
     return this.withDatabase((db) => {

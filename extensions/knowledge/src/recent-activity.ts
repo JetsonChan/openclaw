@@ -80,16 +80,6 @@ function projectRequest(scope: string, request: string, plan: unknown, receipt: 
  * stop before the plan column. A projection written before an older plugin
  * version published (or removed) requests is repaired here. */
 function syncRecentProjection(db: DatabaseSync, scope: string) {
-  // A derived cache, so additive and version-independent: older plugin
-  // versions ignore it and this function repairs whatever they published.
-  db.exec(`CREATE TABLE IF NOT EXISTS recent_requests_v1 (
-      scope TEXT NOT NULL, request TEXT NOT NULL, operation TEXT, target_id TEXT, at TEXT, reason TEXT, replacement_id TEXT,
-      PRIMARY KEY(scope,request)
-    );
-    CREATE TABLE IF NOT EXISTS recent_records_v1 (
-      scope TEXT NOT NULL, request TEXT NOT NULL, ordinal INTEGER NOT NULL, id TEXT, hash TEXT, revision, actor TEXT, kind TEXT, type TEXT, title TEXT,
-      PRIMARY KEY(scope,request,ordinal)
-    );`);
   const published = "SELECT request FROM mutations WHERE scope=? AND state='published'";
   const fresh = `FROM mutations m WHERE m.scope=? AND m.state='published' AND NOT EXISTS (SELECT 1 FROM recent_requests_v1 r WHERE r.scope=m.scope AND r.request=m.request)`;
   const missing = db.prepare(`SELECT 1 ${fresh} LIMIT 1`).get(scope);

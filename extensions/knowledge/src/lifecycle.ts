@@ -109,9 +109,6 @@ export function lifecycleImpact(records: LoadedRecord[], target: string) {
 
 /** Durable operational state: unlike indexes, these guards must survive rebuilds/backups. */
 export function observeLifecycleGuards(db: DatabaseSync, records: LoadedRecord[], binding: string) {
-  db.exec(
-    "CREATE TABLE IF NOT EXISTS lifecycle_guards_v1 (binding TEXT NOT NULL, id TEXT NOT NULL, lifecycle TEXT NOT NULL, metadata TEXT NOT NULL, PRIMARY KEY(binding,id)) STRICT",
-  );
   for (const r of records) {
     if (r.lifecycle === "withdrawn" || r.lifecycle === "superseded") {
       // Withdrawal dominates supersession, and stale restores cannot replace the first guard.

@@ -77,9 +77,8 @@ default, or `$OPENCLAW_STATE_DIR`):
 
 ```text
 <state dir>/knowledge/
-  registry.sqlite             # store identities, bindings, assignment journal
+  registry.sqlite             # store identities, bindings, assignment journal, maintenance schedule
   registry.id                 # sentinel: a missing or emptied registry needs recovery
-  maintenance.json            # maintenance schedule state and last results
   stores/<vaultId>/
     state.sqlite              # journal, history, search index, Git queue, Recent projection
     vault/

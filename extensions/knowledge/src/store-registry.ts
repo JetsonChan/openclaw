@@ -139,6 +139,15 @@ export class StoreRegistry {
     return raw ? JSON.parse(raw) : null;
   }
 
+  /** Maintenance schedule bookkeeping (next slot and last pass); validated by its reader. */
+  maintenance(value?: Record<string, unknown>): unknown {
+    if (value) {
+      this.tx(() => this.setMeta("maintenance", JSON.stringify(value)));
+    }
+    const raw = this.meta("maintenance");
+    return raw ? JSON.parse(raw) : null;
+  }
+
   private tx<T>(run: () => T): T {
     return runSqliteImmediateTransactionSync(this.db, run);
   }
@@ -485,6 +494,8 @@ function isFile(file: string) {
   }
 }
 // Create exactly once; an existing file is verified by the caller, never replaced.
+// An empty file is this call's own interrupted creation (a crash between create
+// and write), so it is completed rather than left for the caller to reject.
 function writeOnce(file: string, text: string) {
   let fd: number;
   try {
@@ -495,10 +506,14 @@ function writeOnce(file: string, text: string) {
     );
   } catch (e) {
     // SAFETY: Node filesystem calls reject with errno exceptions.
-    if ((e as NodeJS.ErrnoException).code === "EEXIST") {
+    if ((e as NodeJS.ErrnoException).code !== "EEXIST") {
+      throw e;
+    }
+    const existing = lstatSync(file);
+    if (!existing.isFile() || existing.size !== 0) {
       return;
     }
-    throw e;
+    fd = openSync(file, constants.O_WRONLY | constants.O_NOFOLLOW);
   }
   try {
     writeSync(fd, text);

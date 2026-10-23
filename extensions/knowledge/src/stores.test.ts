@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { readdir, rename, access } from "node:fs/promises";
+import { readdir, rename, access, mkdir, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { Check } from "typebox/value";
 import { expect, it } from "vitest";
@@ -112,9 +112,12 @@ it("concurrent first uses converge on one store identity", async () => {
   expect(await f.titles("main")).toStrictEqual(["One", "Three", "Two"]);
 });
 
-it("interrupted initialization resumes the same identity", async () => {
+it.each([
+  ["before any file work", false],
+  ["after creating its manifest and database files", true],
+])("initialization interrupted %s resumes the same identity", async (_point, filesCreated) => {
   const f = await fixture();
-  // Simulate a crash after the reservation committed but before any file work.
+  // Simulate a crash after the reservation committed.
   const reserve = new StoreRegistry(f.stateRoot);
   reserve["tx"](() => {
     reserve["db"]
@@ -133,6 +136,13 @@ it("interrupted initialization resumes the same identity", async () => {
       .run();
   });
   reserve.close();
+  if (filesCreated) {
+    // Exclusive creates succeeded, then the process died before writing either file.
+    const dir = path.join(f.stateRoot, "stores", "11111111-1111-4111-8111-111111111111");
+    await mkdir(path.join(dir, "vault", "private"), { recursive: true });
+    await writeFile(path.join(dir, "vault", "vault.json"), "");
+    await writeFile(path.join(dir, "state.sqlite"), "");
+  }
   await f.save("main", "After crash");
   expect(await f.storesDir()).toStrictEqual(["11111111-1111-4111-8111-111111111111"]);
   expect((await f.service.status({}, f.as("main"))).vault).toBe(
@@ -516,7 +526,6 @@ it("recovery keeps a shared store bound to its data even when other edits confli
 it("an emptied registry is recovery, never a fresh set of empty stores", async () => {
   const f = await fixture();
   await f.save("main", "Kept");
-  const { writeFile } = await import("node:fs/promises");
   await writeFile(path.join(f.stateRoot, "registry.sqlite"), "");
   await expect(createKnowledgeService(f.api).records({}, f.as("main"))).rejects.toThrow(/registry/);
   expect((await f.storesDir()).length).toBe(1);

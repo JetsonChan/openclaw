@@ -76,7 +76,7 @@ created. One failing store does not stop the others. A plugin reload or store
 reassignment ends the current pass.
 
 The next slot and the last results persist in
-`<state dir>/knowledge/maintenance.json`. If a slot passes while the Gateway is
+`<state dir>/knowledge/registry.sqlite`. If a slot passes while the Gateway is
 down, the pass catches up 60 seconds after the next start. Two passes never run
 at once.
 

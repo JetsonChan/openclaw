@@ -9,7 +9,9 @@ it("Recent projection follows later publications and removed requests", () => {
   const db = new DatabaseSync(":memory:");
   afterTest(() => db.close());
   db.exec(`CREATE TABLE history(sequence INTEGER PRIMARY KEY, scope TEXT,id TEXT,hash TEXT,revision INTEGER,provenance TEXT,at TEXT);
-    CREATE TABLE mutations(scope TEXT,request TEXT,intent TEXT,state TEXT,plan TEXT,receipt TEXT, PRIMARY KEY(scope,request));`);
+    CREATE TABLE mutations(scope TEXT,request TEXT,intent TEXT,state TEXT,plan TEXT,receipt TEXT, PRIMARY KEY(scope,request));
+    CREATE TABLE recent_requests_v1(scope TEXT,request TEXT,operation TEXT,target_id TEXT,at TEXT,reason TEXT,replacement_id TEXT, PRIMARY KEY(scope,request));
+    CREATE TABLE recent_records_v1(scope TEXT,request TEXT,ordinal INTEGER,id TEXT,hash TEXT,revision,actor TEXT,kind TEXT,type TEXT,title TEXT, PRIMARY KEY(scope,request,ordinal));`);
   const at = "2026-10-01T00:00:00Z",
     active: any = [];
   const publish = (request: any, id: any, state = "published") => {
