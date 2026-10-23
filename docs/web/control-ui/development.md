@@ -39,7 +39,7 @@ checker's growth and build-variance allowances; the baseline itself may not exce
 boot is limited to three CSS requests: the initial sheet, shared route styles,
 and the route's own sheet. Optional component styles stay with their lazy modules.
 CSS consolidation is bounded by the largest-sheet cap and at most 64 B total
-CSS gzip growth against the merge base; splitting files is not a byte reduction.
+CSS raw and gzip growth against the merge base; splitting files is not a byte reduction.
 The boot manifest retains reachable CSS imports even when extraction removes their
 JavaScript source-map entries. Complete boot JavaScript is capped
 at 1,500,000 B gzip for chat and 1,035,000 B gzip for New Session, including the

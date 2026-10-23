@@ -306,6 +306,16 @@ describe("Control UI performance budgets", () => {
     expect(evaluateBudgets(collectMetrics(distDir), undefined, null, 512, base)).toEqual([
       { metric: "total CSS gzip growth", actual: 65, limit: 64, unit: "bytes" },
     ]);
+    writeAsset("shared.css", 8_064, 3_900);
+    const rawAtLimit = collectMetrics(distDir);
+    expect(evaluateBudgets(rawAtLimit, undefined, null, 512, base)).toEqual([]);
+    expect(formatReport(rawAtLimit, undefined, null, 512, base)).toContain(
+      "total CSS raw vs base: 8050 B -> 8114 B (+64 B; growth up to 64 B allowed)",
+    );
+    writeAsset("shared.css", 8_065, 3_900);
+    expect(evaluateBudgets(collectMetrics(distDir), undefined, null, 512, base)).toEqual([
+      { metric: "total CSS raw growth", actual: 65, limit: 64, unit: "bytes" },
+    ]);
   });
 
   it("rejects the renderer in route boot preloads", () => {

@@ -693,7 +693,7 @@ suite.define(() => {
           await card.getByRole("button", { name: "Task progress options" }).press("Enter");
           const hideCard = card.getByRole("menuitem", { name: "Hide this card", exact: true });
           await hideCard.press("Enter");
-          // Let deferred keyboard selection finish before resizing can retire the menu.
+          // Keyboard selection may wait for the lazy menu runtime; let it finish before resizing.
           await hideCard.waitFor({ state: "hidden" });
           expect(await card.count()).toBe(1);
           await page.setViewportSize({ width, height: 900 });

@@ -59,10 +59,10 @@ const controlUiPerformanceBudgets = {
   // Initial shell plus shared route styles and the route's own stylesheet.
   chatBootCssRequests: 3,
   newBootCssRequests: 3,
-  // Deferred menus and closed dialogs: 1,349,135 B Chat and 823,357 B New Session.
-  // Retain the stricter prior caps after the current-main measurement refresh.
-  chatBootJsGzipBytes: 1_400_431,
-  newBootJsGzipBytes: 834_356,
+  // Creation transfer split: 1,347,441 B Chat and 822,816 B New Session.
+  // Preserve the incoming caps' relative headroom against the matched main build.
+  chatBootJsGzipBytes: 1_398_738,
+  newBootJsGzipBytes: 833_875,
   startupCssRequests: 1,
   // Solid 2 action/optimistic runtime adoption; offset tracked by HF-STARTUP-BUDGET.
   startupJsGzipBytes: 325_081,
@@ -387,6 +387,15 @@ export function evaluateControlUiPerformanceBudgets(
         });
       }
     }
+    const rawGrowth = metrics.total.css.rawBytes - baseMetrics.total.css.rawBytes;
+    if (rawGrowth > CONTROL_UI_GZIP_BUILD_VARIANCE_BYTES) {
+      violations.push({
+        metric: "total CSS raw growth",
+        actual: rawGrowth,
+        limit: CONTROL_UI_GZIP_BUILD_VARIANCE_BYTES,
+        unit: "bytes",
+      });
+    }
   }
   if (baselineBytes !== undefined && baselineBytes > budgets.startupJsGzipBytes) {
     violations.unshift({
@@ -545,6 +554,10 @@ export function formatControlUiPerformanceReport(
         `  ${area} CSS gzip vs base: ${baseMetrics[area].css.gzipBytes} B -> ${metrics[area].css.gzipBytes} B (${growth >= 0 ? "+" : ""}${growth} B; growth up to ${limit} B allowed)`,
       );
     }
+    const rawGrowth = metrics.total.css.rawBytes - baseMetrics.total.css.rawBytes;
+    lines.push(
+      `  total CSS raw vs base: ${baseMetrics.total.css.rawBytes} B -> ${metrics.total.css.rawBytes} B (${rawGrowth >= 0 ? "+" : ""}${rawGrowth} B; growth up to ${CONTROL_UI_GZIP_BUILD_VARIANCE_BYTES} B allowed)`,
+    );
   }
   for (const warning of controlUiPerformanceWarnings(metrics, budgets)) {
     lines.push(`  warning: ${warning}`);
