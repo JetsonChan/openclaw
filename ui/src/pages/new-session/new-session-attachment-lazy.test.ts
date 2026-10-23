@@ -5,12 +5,36 @@ import "./new-session-page-entry.ts";
 
 const detailImport = vi.hoisted(() => ({
   started: false,
+  calls: 0,
+  first: Promise.withResolvers<void>(),
   ready: Promise.withResolvers<void>(),
+  recovery: Promise.withResolvers<void>(),
+  canReload: () => false,
 }));
 vi.mock("../chat/components/chat-detail-panel.tsx", async (importOriginal) => {
   detailImport.started = true;
+  if (++detailImport.calls === 1) {
+    await detailImport.first.promise;
+    throw new Error("Failed to fetch dynamically imported module");
+  }
   await detailImport.ready.promise;
   return importOriginal();
+});
+vi.mock("../../app/stale-chunk-reload.ts", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../../app/stale-chunk-reload.ts")>();
+  return {
+    ...actual,
+    // Vitest wraps rejected mock imports; browsers deliver the original import error.
+    isStaleChunkImportError: (error: unknown) =>
+      actual.isStaleChunkImportError(
+        error instanceof Error && error.cause instanceof Error ? error.cause : error,
+      ),
+    retryStaleChunkReloadWhenReachable: async (options: { canReload: () => boolean }) => {
+      detailImport.canReload = options.canReload;
+      await detailImport.recovery.promise;
+      return false;
+    },
+  };
 });
 
 type NewSessionElement = HTMLElement & {
@@ -55,7 +79,9 @@ async function pasteAttachment(page: NewSessionElement, text: string) {
 }
 
 afterEach(async () => {
+  detailImport.first.resolve();
   detailImport.ready.resolve();
+  detailImport.recovery.resolve();
   document.querySelectorAll("openclaw-new-session-page").forEach((element) => element.remove());
   await vi.dynamicImportSettled();
   vi.unstubAllGlobals();
@@ -63,7 +89,7 @@ afterEach(async () => {
   window.history.replaceState({}, "", "/");
 });
 
-it("keeps the draft usable during a cold preview and retires the preview before its import settles", async () => {
+it("keeps the draft usable through a cold preview retry and retires it before the import settles", async () => {
   const page = document.createElement("openclaw-new-session-page") as NewSessionElement;
   page.data = routeData("research");
   document.body.append(page);
@@ -83,9 +109,21 @@ it("keeps the draft usable during a cold preview and retires the preview before 
   expect(page.querySelector(".new-session-page__message")).toBe(textarea);
   expect(textarea.value).toBe("Keep typing while the preview loads");
 
+  detailImport.first.resolve();
+  await waitForSolid(() => expect(page.querySelector(".lazy-view-error--stale")).not.toBeNull());
+  page.querySelector<HTMLButtonElement>(".lazy-view-error__action")!.click();
+  await waitForSolid(() =>
+    expect(page.querySelector(".new-session-attachment-panel [role='status']")).not.toBeNull(),
+  );
+  expect(textarea.value).toBe("Keep typing while the preview loads");
+  expect(detailImport.canReload()).toBe(true);
+  detailImport.recovery.resolve();
+  await waitForSolid(() => expect(detailImport.calls).toBe(2));
+
   window.history.replaceState({}, "", "/new?agent=main");
   page.data = routeData("main");
   await waitForSolid(() => expect(page.querySelector(".new-session-attachment-panel")).toBeNull());
+  expect(detailImport.canReload()).toBe(false);
   detailImport.ready.resolve();
   await vi.dynamicImportSettled();
   expect(page.querySelector("openclaw-chat-detail-panel")).toBeNull();

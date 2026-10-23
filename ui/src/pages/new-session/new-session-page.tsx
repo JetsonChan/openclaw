@@ -1,6 +1,7 @@
 import {
   children,
   createMemo,
+  createSignal,
   Errored,
   isPending,
   lazy,
@@ -532,6 +533,7 @@ function renderPageContent(host: PageHost) {
               <Errored
                 fallback={(error, reset) => {
                   let active = true;
+                  const [retrying, setRetrying] = createSignal(false);
                   const stale = isStaleChunkImportError(error());
                   const canRetry = () =>
                     active && owner.isConnected && owner.attachmentPanel !== null;
@@ -545,6 +547,7 @@ function renderPageContent(host: PageHost) {
                     if (!canRetry()) {
                       return;
                     }
+                    setRetrying(true);
                     if (
                       stale &&
                       (await retryStaleChunkReloadWhenReachable({ canReload: canRetry }))
@@ -552,11 +555,12 @@ function renderPageContent(host: PageHost) {
                       return;
                     }
                     if (canRetry()) {
+                      setRetrying(false);
                       reset();
                     }
                   };
                   return (
-                    <Show when={!isPending(content)} fallback={loading()}>
+                    <Show when={!retrying() && !isPending(content)} fallback={loading()}>
                       <LazyViewError
                         error={error()}
                         stale={stale}
