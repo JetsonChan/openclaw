@@ -108,21 +108,18 @@ export function createIngressWriter<TPayload, TMetadata, TCompletedMetadata>(
       recordAttempt?: boolean;
       retry?: ChannelIngressRetryState;
     },
-  ) => {
-    const { retry, ...release } = releaseOptions ?? {};
-    const lastError = encodeIngressRetryError(release.lastError, retry);
-    return commitClaimWriteWithRetry({
+  ) =>
+    commitClaimWriteWithRetry({
       claim,
       label: "release",
       write: () =>
         queue.release(claim, {
-          ...release,
-          ...(lastError === undefined ? {} : { lastError }),
+          lastError: encodeIngressRetryError(releaseOptions?.lastError, releaseOptions?.retry),
+          recordAttempt: releaseOptions?.recordAttempt,
           releasedAt: now(),
         }),
       falseMeansReclaimed: false,
     });
-  };
 
   const failClaim = (
     claim: ChannelIngressQueueClaim<TPayload, TMetadata>,

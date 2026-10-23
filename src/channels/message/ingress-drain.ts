@@ -305,11 +305,7 @@ export function createChannelIngressDrainOwner<
     const committed =
       disposition.kind === "fail"
         ? await failClaim(claim, disposition.reason, disposition.message)
-        : await releaseClaim(claim, {
-            lastError: disposition.message,
-            ...(disposition.recordAttempt === false ? { recordAttempt: false } : {}),
-            ...(disposition.retry ? { retry: disposition.retry } : {}),
-          });
+        : await releaseClaim(claim, { ...disposition, lastError: disposition.message });
     const displayId = claim.id.replace(/^0+(?=\d)/, "") || claim.id;
     if (!committed) {
       log(`spooled update ${displayId} settlement skipped: claim no longer owns the event`);
@@ -798,7 +794,8 @@ export function createChannelIngressDrainOwner<
     options.abortSignal?.removeEventListener("abort", abortActiveClaims);
     abortActiveClaims();
     // Snapshot: removeActive mutates activeByClaim during this sweep.
-    for (const state of Array.from(activeByClaim.values())) {
+    const activeStates = Array.from(activeByClaim.values());
+    for (const state of activeStates) {
       removeActive(state);
     }
   }
@@ -812,7 +809,8 @@ export function createChannelIngressDrainOwner<
     drainOnce,
     activeLaneKeys: () => new Set(laneOwnerByKey.keys()),
     waitForIdle: async () => {
-      await Promise.allSettled(Array.from(activeByClaim.values(), (state) => state.task));
+      const tasks = [...activeByClaim.values()].map((state) => state.task);
+      await Promise.allSettled(tasks);
     },
     dispose,
   };
