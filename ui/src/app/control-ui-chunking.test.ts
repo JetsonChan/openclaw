@@ -178,9 +178,9 @@ describe("Control UI build chunking", () => {
     if (Array.isArray(result) || !("output" in result)) {
       throw new Error("Expected one in-memory build");
     }
-    const styles = result.output.filter(
-      (asset) => asset.type === "asset" && asset.fileName.endsWith(".css"),
-    );
+    const styles = result.output
+      .filter((asset) => asset.type === "asset")
+      .filter((asset) => asset.fileName.endsWith(".css"));
     expect(styles).toHaveLength(2);
     const sharedStyles = styles.find((style) => String(style.source).includes(".shared-fixture"));
     expect(sharedStyles).toMatchObject({ source: expect.stringContaining(".sidebar-fixture") });
