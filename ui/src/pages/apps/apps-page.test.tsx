@@ -120,6 +120,7 @@ it("loads conversation alongside discovery, retries errors, and retires a closed
   setSearch("");
   await waitForSolid(() => expect(container.querySelector(".apps-page")).not.toBeNull());
   retry.reject(new Error("Retired conversation download"));
+  await expect(import("./apps-conversation.tsx")).rejects.toThrow();
   await waitForSolid(() => expect(container.querySelector('[role="alert"]')).toBeNull());
 
   mockLoad(Promise.resolve());
