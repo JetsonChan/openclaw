@@ -126,7 +126,7 @@ it.each([
 
 it("qualifies the actual package-tooling Node when the Node host has a custom executable name", async () => {
   Object.defineProperty(process, "versions", {
-    value: { ...originalVersions, node: "26.7.0", bun: undefined },
+    value: { ...originalVersions, node: "26.12.1", bun: undefined },
   });
   Object.defineProperty(process, "execPath", { value: path.resolve("fixture", "node26") });
   await fs.writeFile(

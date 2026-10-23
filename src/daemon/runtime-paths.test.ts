@@ -138,7 +138,7 @@ it("rejects a Bun node shim even when its emulated Node and SQLite versions are 
 describe("resolvePreferredNodePath", () => {
   it.each([
     ["24.22.1", false, "unsupported"],
-    ["24.15.0+vendor.1", true, "supported"],
+    ["24.15.0+vendor.1", true, "unsupported"],
   ] as const)(
     "probes the selected binary's decoder on Node %s",
     async (version, lossless, expected) => {
@@ -226,10 +226,10 @@ describe("resolvePreferredNodePath", () => {
   );
 
   const supported = nodeRuntime("24.22.1");
-  const unsafeSqlite = nodeRuntime("24.17.0", "3.51.2");
+  const unsafeSqlite = nodeRuntime("24.22.1", "3.51.2");
   it("prefers the supported CLI runtime when repairing an unsupported service runtime", async () => {
     mockNodePathPresent(darwinNode);
-    const execFile = vi.fn().mockResolvedValue(nodeRuntime("26.8.1"));
+    const execFile = vi.fn().mockResolvedValue(nodeRuntime("26.12.1"));
     expect(
       await preferredNode({
         execFile,
@@ -282,7 +282,7 @@ describe("resolvePreferredNodePath", () => {
     const execFile = vi
       .fn()
       .mockResolvedValueOnce(nodeRuntime("24.22.1"))
-      .mockResolvedValueOnce(nodeRuntime("26.8.1"));
+      .mockResolvedValueOnce(nodeRuntime("26.12.1"));
 
     const result = await resolveSystemNodeInfo({
       env: {},
@@ -293,7 +293,7 @@ describe("resolvePreferredNodePath", () => {
 
     expect(result).toMatchObject({
       path: targetCompatibleNode,
-      version: "26.8.1",
+      version: "26.12.1",
       status: "supported",
     });
   });
@@ -604,7 +604,7 @@ describe("resolveSystemNodeInfo", () => {
       path: darwinNode,
       sqliteProbe: { available: true, version: "3.51.2", text: true, blob: true, json: true },
       sqliteVersion: "3.51.2",
-      version: "24.17.0",
+      version: "24.22.1",
       nodeSharedSqlite: false,
       status: "unsupported",
     });
@@ -619,7 +619,7 @@ describe("resolveSystemNodeInfo", () => {
       path: "/usr/bin/node",
       sqliteProbe: { available: true, version: "3.51.2", text: true, blob: true, json: true },
       sqliteVersion: "3.51.2",
-      version: "24.17.0",
+      version: "24.22.1",
       nodeSharedSqlite: true,
       status: "unsupported",
     });

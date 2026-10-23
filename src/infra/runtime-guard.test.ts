@@ -91,7 +91,7 @@ describe("runtime-guard", () => {
   it.each([
     ["24.22.1", true, true],
     ["24.22.1", false, false],
-    ["24.15.0+vendor.1", true, true],
+    ["24.15.0+vendor.1", true, false],
     ["24.15.0+vendor.1", false, false],
   ] as const)("gates Node %s with lossless SQLite %s", async (version, lossless, admitted) => {
     const runtime = { log: vi.fn(), error: vi.fn(), exit: vi.fn() };
@@ -107,7 +107,9 @@ describe("runtime-guard", () => {
     await assertSupportedRuntime(runtime, details);
     expect(runtime.exit).toHaveBeenCalledTimes(admitted ? 0 : 1);
     if (!admitted) {
-      expect(runtime.error).toHaveBeenCalledWith(expect.stringContaining("nodejs/node#61954"));
+      expect(runtime.error).toHaveBeenCalledWith(
+        expect.stringContaining(lossless ? "openclaw requires Node" : "nodejs/node#61954"),
+      );
     }
   });
 

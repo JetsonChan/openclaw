@@ -254,13 +254,13 @@ describe("cross-OS release checks workflow", () => {
         ["ubuntu", "packaged-upgrade", "26.12.1", "26.12.1"],
         // The public workflow_ref input can select a pre-field tooling revision.
         ["windows", "packaged-fresh", undefined, "24.22.1"],
-        ["windows", "packaged-upgrade", undefined, "24.19.0"],
-        ["macos", "packaged-fresh", undefined, "24.19.0"],
+        ["windows", "packaged-upgrade", undefined, "24.22.1"],
+        ["macos", "packaged-fresh", undefined, "24.22.1"],
       ]) {
         expect(
           runInNewContext(expression.replace(/^\$\{\{(.*)\}\}$/u, "$1"), {
             matrix: { os_id: osId, suite, node_version: nodeVersion },
-            env: { NODE_VERSION: "24.19.0" },
+            env: { NODE_VERSION: "24.22.1" },
           }),
           `${setupName}: ${osId}/${suite}/${nodeVersion ?? "legacy"}`,
         ).toBe(expected);
