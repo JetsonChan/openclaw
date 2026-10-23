@@ -2188,7 +2188,6 @@ openclaw-settings-save-indicator:empty {
 }
 
 .sidebar-recent-session--active .sidebar-recent-session__name {
-  font-weight: 600;
   color: var(--text-strong);
 }
 
@@ -4568,8 +4567,6 @@ html.openclaw-native-web-chrome
 .sidebar-recent-session--single-line .sidebar-recent-session__name {
   width: auto;
   flex: 1 1 0;
-  /* Flex assigns the width; selection weight changes need not resize ancestors. */
-  contain: inline-size;
 }
 
 .sidebar-recent-session--single-line > .sidebar-recent-session__aside {
