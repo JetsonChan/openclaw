@@ -1396,7 +1396,8 @@ describe("CI changed Node test plan", () => {
         expect(group.minTotalMemoryBytes).toBe(owner.minTotalMemoryBytes);
         const childEnv = expectProjectedNodeTestResources(job, group, ownerJob, owner, envScratch);
         expect(childEnv.OPENCLAW_VITEST_MAX_WORKERS).toBe("2");
-        expect(job.runner).toBe(ownerJob.runner);
+        // Selected groups can repack into a smaller bundle without changing their resource owner.
+        expect(group.runner).toBe(owner.runner);
       }
     }
     const cheapFiles = vi
