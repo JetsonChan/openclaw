@@ -373,11 +373,7 @@ export function collectBundledPluginBuildEntries(params = {}) {
         .join(", ")}`,
     );
   }
-  // Package composition adds first-party plugins excluded from the core package.
-  // The Docker selector must remain in the entry graph even when a core build
-  // whitelist narrows the buildable plugins.
-  const selectedBuildIds = new Set([...filteredBuildIds, ...(dockerSelectedBuildIds ?? [])]);
-  return entries.filter((entry) => selectedBuildIds.has(entry.id));
+  return entries.filter((entry) => filteredBuildIds.has(entry.id));
 }
 
 /** One source-checkout output plan for compilation, metadata, and readiness checks. */
