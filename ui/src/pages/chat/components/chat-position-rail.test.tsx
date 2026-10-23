@@ -4,7 +4,7 @@ import { createSignal } from "solid-js";
 import { afterEach, assert, beforeEach, describe, expect, it, vi } from "vitest";
 import { mountSolid } from "../../../test-helpers/mount-solid.ts";
 import { flush } from "../../../test-helpers/solid-settle.ts";
-import { createTestTranscript, stubAnimationFrames } from "../chat-view.test-helpers.ts";
+import { createTestTranscript, stubSettledAnimationFrames } from "../chat-view.test-helpers.ts";
 import {
   mountChatThread as mountThread,
   mountTestTranscript,
@@ -23,14 +23,6 @@ import {
   transcriptDomState,
   type TestContentRow,
 } from "./chat-transcript.test-support.ts";
-
-function stubSettledAnimationFrames() {
-  const frame = stubAnimationFrames();
-  return () => {
-    frame();
-    flush();
-  };
-}
 
 describe("conversation position rail", () => {
   beforeEach(installTranscriptDomMocks);
