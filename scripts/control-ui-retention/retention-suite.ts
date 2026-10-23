@@ -11,6 +11,7 @@ import { buildSandboxHostDocument, buildSandboxHostPath } from "../../src/agents
 import type { RouteId } from "../../ui/src/app-route-paths.ts";
 import { createControlUiE2eArtifactDir } from "../../ui/src/test-helpers/control-ui-e2e-artifacts.ts";
 import {
+  captureControlUiE2eFailureDiagnostics,
   installMockGateway,
   navigateToControlUiSession,
   resolvePlaywrightChromiumExecutablePath,
@@ -267,6 +268,11 @@ async function measure(
     coverage.push({ workload, outcome: "passed" });
   } catch (error) {
     coverage.push({ workload, outcome: String(error) });
+    await captureControlUiE2eFailureDiagnostics(page, {
+      error: error instanceof Error ? error : new Error(String(error)),
+      label: workload,
+      pageErrors: errors,
+    });
     // A stalled font load is one retention trigger; Playwright screenshots wait
     // for fonts.ready and could hide the original failure behind that wait.
     const screenshot = await cdp.send("Page.captureScreenshot");
