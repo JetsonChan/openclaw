@@ -115,20 +115,23 @@ describe("OpenAI completions output budgets", () => {
     },
   );
 
-  it("reserves response schema space in addition to measured request pressure", () => {
+  it.each([
+    { name: "an already measured", tokens: 24_000, schemaChars: 16_000, output: 8_192 },
+    { name: "a new or enlarged", tokens: 1_000, schemaChars: 80_000, output: 7_734 },
+  ])("uses payload accounting for $name response schema", ({ tokens, schemaChars, output }) => {
     const context = emptyContext();
-    measuredRequestPressure.set(proxy, context, 1_000);
-    const params = buildOpenAICompletionsParams(proxy, context, {
+    const model = { ...proxy, contextWindow: 32_768, maxTokens: 8_192 };
+    measuredRequestPressure.set(model, context, tokens);
+    const params = buildOpenAICompletionsParams(model, context, {
       responseFormat: {
         type: "json_schema",
         json_schema: {
           name: "report",
-          schema: { type: "string", description: "x".repeat(16_000) },
+          schema: { type: "string", description: "x".repeat(schemaChars) },
         },
       },
     });
-    expect(params.max_completion_tokens).toBeLessThan(4_500);
-    expect(params.max_completion_tokens).toBeGreaterThan(3_000);
+    expectBudget(params, output);
   });
 
   it.each([

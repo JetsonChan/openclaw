@@ -505,15 +505,13 @@ export function buildOpenAICompletionsRequest(
       clampedMaxTokens !== undefined &&
       effectiveContextTokens !== undefined
     ) {
-      const measuredInputTokens = measuredRequestPressure.get(model, context);
+      // The measured predecessor does not bind the response-format identity.
+      const measuredInputTokens =
+        params.response_format === undefined
+          ? measuredRequestPressure.get(model, context)
+          : undefined;
       const estimatedInputTokens =
-        measuredInputTokens === undefined
-          ? estimateOpenAICompletionsInputTokens(params)
-          : measuredInputTokens +
-            estimateOpenAICompletionsInputTokens({
-              messages: [],
-              response_format: params.response_format,
-            });
+        measuredInputTokens ?? estimateOpenAICompletionsInputTokens(params);
       const remainingBudget = Math.max(0, effectiveContextTokens - estimatedInputTokens - 1);
       if (clampedMaxTokens > remainingBudget) {
         // Tool arguments need useful headroom even when the provider accepts a smaller cap.

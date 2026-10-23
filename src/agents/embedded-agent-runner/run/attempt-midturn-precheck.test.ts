@@ -41,6 +41,15 @@ describe("provider request admission", () => {
       compatibleBudget: true,
     },
     {
+      name: "unchanged response schema is not charged twice on a tool continuation",
+      usage: 24_000,
+      chars: 100,
+      cap: 16_000,
+      fits: true,
+      compatibleBudget: true,
+      responseSchema: true,
+    },
+    {
       name: "owning engine cannot submit oversized assembled history on its first request",
       usage: 15_000,
       chars: 12_000,
@@ -198,6 +207,7 @@ describe("provider request admission", () => {
       ownsCompaction,
       oversizedAssembly,
       compatibleBudget,
+      responseSchema,
     }) => {
       const fixture = await createFixture({ exerciseTerminalMerges: false });
       const model = {
@@ -218,7 +228,8 @@ describe("provider request admission", () => {
         ? "Read the report."
         : "Keep these instructions. ".repeat(2_200);
       const reasoningHistory = "synthetic reasoning ".repeat(3_500);
-      const seededManager = compatibleBudget ? SessionManager.inMemory() : undefined;
+      const seededManager =
+        compatibleBudget && !responseSchema ? SessionManager.inMemory() : undefined;
       if (seededManager) {
         await seededManager.appendMessageAsync({
           role: "user",
@@ -335,8 +346,11 @@ describe("provider request admission", () => {
       runtime.cacheTrace = null;
       runtime.isOpenAIResponsesApi = opaque === true;
       runtime.transcriptPolicy = { ...runtime.transcriptPolicy, repairToolUseResultPairing: false };
-      const wireRequests: Array<{ max_tokens?: number; messages: Array<Record<string, unknown>> }> =
-        [];
+      const wireRequests: Array<{
+        max_tokens?: number;
+        messages: Array<Record<string, unknown>>;
+        response_format?: unknown;
+      }> = [];
       session.agent.streamFn = (_model, context) => {
         requests.push({ ...context, messages: structuredClone(context.messages) });
         const toolCall = {
@@ -444,9 +458,22 @@ describe("provider request admission", () => {
           },
         });
         const transport = createOpenAICompletionsTransportStreamFn();
+        const responseFormat = responseSchema
+          ? {
+              type: "json_schema",
+              json_schema: {
+                name: "report",
+                schema: { type: "string", description: "x".repeat(16_000) },
+              },
+            }
+          : undefined;
         session.agent.streamFn = (activeModel, context, options) => {
           requests.push({ ...context, messages: structuredClone(context.messages) });
-          return transport(activeModel, context, { ...options, apiKey: "synthetic-key" });
+          return transport(activeModel, context, {
+            ...options,
+            apiKey: "synthetic-key",
+            responseFormat,
+          });
         };
       }
       const streamGuards = installEmbeddedAttemptStreamGuards(fixture.input, {
@@ -497,11 +524,16 @@ describe("provider request admission", () => {
         );
         expect(pendingPrecheck !== null).toBe(!fits);
         if (compatibleBudget) {
-          expect(
-            wireRequests.every((request) =>
-              request.messages.some((message) => message.reasoning_content === reasoningHistory),
-            ),
-          ).toBe(true);
+          if (responseSchema) {
+            expect(wireRequests[0]?.response_format).toMatchObject({ type: "json_schema" });
+            expect(wireRequests[1]?.response_format).toEqual(wireRequests[0]?.response_format);
+          } else {
+            expect(
+              wireRequests.every((request) =>
+                request.messages.some((message) => message.reasoning_content === reasoningHistory),
+              ),
+            ).toBe(true);
+          }
           expect(wireRequests.map((request) => request.max_tokens)).toEqual([8_192, 8_192]);
         }
         if (fits) {

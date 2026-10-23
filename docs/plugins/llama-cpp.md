@@ -480,9 +480,10 @@ for older llama-server builds.
 For tool continuations with an unchanged prompt prefix, OpenClaw uses the server's
 measured context usage plus newly appended content to budget the next response.
 This avoids charging historical reasoning that the chat template discards.
-The first request of an attempt, or a request with a changed prefix, keeps the
-conservative payload estimate. Replayed reasoning is preserved for templates
-that need it, and genuinely full contexts still trigger output limits or compaction.
+The first request of an attempt, a request with a changed prefix, or a request with
+a response schema keeps the conservative payload estimate. Replayed reasoning is
+preserved for templates that need it, and genuinely full contexts still trigger
+output limits or compaction.
 
 Local memory embeddings require managed mode:
 
