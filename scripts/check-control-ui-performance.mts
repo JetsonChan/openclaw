@@ -58,7 +58,8 @@ const controlUiPerformanceBudgets = {
   newBootJsRequests: 19,
   // Creation transfer split: 1,347,441 B Chat and 822,816 B New Session.
   // Preserve the incoming caps' relative headroom against the matched main build.
-  chatBootJsGzipBytes: 1_398_738,
+  // Browser client/annotation leaves retain the previous relative Chat headroom.
+  chatBootJsGzipBytes: 1_393_091,
   newBootJsGzipBytes: 833_875,
   startupCssRequests: 1,
   // Solid 2 action/optimistic runtime adoption; offset tracked by HF-STARTUP-BUDGET.
