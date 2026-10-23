@@ -507,12 +507,6 @@ function buildCoreDistEntries(): Record<string, string> {
     "legacy-config-binding-repair.runtime":
       "src/commands/doctor/shared/legacy-config-binding-repair.runtime.ts",
     "infra/warning-filter": "src/infra/warning-filter.ts",
-    "telegram-ingress-worker.runtime": bundledPluginFile(
-      "telegram",
-      "src/telegram-ingress-worker.runtime.ts",
-    ),
-    "telegram/audit": bundledPluginFile("telegram", "src/audit.ts"),
-    "telegram/token": bundledPluginFile("telegram", "src/token.ts"),
     "plugins/build-smoke-entry": "src/plugins/build-smoke-entry.ts",
     "plugins/runtime/index": "src/plugins/runtime/index.ts",
     "llm-slug-generator": "src/hooks/llm-slug-generator.ts",

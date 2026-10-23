@@ -509,8 +509,6 @@ const rootEntries = [
   "apps/linux/ui/gateway-notice.js!",
   "apps/linux/ui/gateways.js!",
   "scripts/qa/render-maturity-docs.ts!",
-  bundledPluginFile("telegram", "src/audit.ts", "!"),
-  bundledPluginFile("telegram", "src/token.ts", "!"),
   "src/hooks/bundled/*/handler.ts!",
   "src/hooks/llm-slug-generator.ts!",
   // Local-only test-state consumers are modeled by the full-tree test scan.
