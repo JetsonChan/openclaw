@@ -29,18 +29,15 @@ jobs:
       - uses: actions/checkout@v4
         with:
           persist-credentials: false
-      - uses: pnpm/action-setup@v4
+      - name: Install the pinned toolchain and frozen dependencies
+        uses: ./.github/actions/setup-node-env
         with:
-          version: 12.15.0
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 24.22.1
-          cache: pnpm
-      - run: pnpm install --frozen-lockfile
+          install-bun: "false"
       - run: pnpm config:channels:check
       - run: pnpm channels:catalog:check
       - run: pnpm tsgo:core
       - run: pnpm tsgo:extensions
+      - run: pnpm test test/scripts/bundled-plugin-assets.test.ts --maxWorkers=1
       - run: pnpm test:contracts:channels
       - run: pnpm test:contracts:plugins
 
@@ -51,14 +48,10 @@ jobs:
     timeout-minutes: 90
     steps:
       - uses: actions/checkout@v4
-      - uses: pnpm/action-setup@v4
+      - name: Install the pinned toolchain and frozen dependencies
+        uses: ./.github/actions/setup-node-env
         with:
-          version: 12.15.0
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 24.22.1
-          cache: pnpm
-      - run: pnpm install --frozen-lockfile
+          install-bun: "false"
       - run: pnpm build
       - name: Compose the selected package
         shell: bash
