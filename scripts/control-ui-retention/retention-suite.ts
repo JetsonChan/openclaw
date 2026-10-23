@@ -9,6 +9,7 @@ import { chromium, type Page } from "playwright";
 import { afterAll, beforeAll, expect, it } from "vitest";
 import { buildSandboxHostDocument, buildSandboxHostPath } from "../../src/agents/sandbox-host.ts";
 import type { RouteId } from "../../ui/src/app-route-paths.ts";
+import { openSessionMenuSubmenu } from "../../ui/src/e2e/session-management.test-support.ts";
 import { createControlUiE2eArtifactDir } from "../../ui/src/test-helpers/control-ui-e2e-artifacts.ts";
 import {
   captureControlUiE2eFailureDiagnostics,
@@ -305,7 +306,17 @@ for (const scene of selectedScenes) {
           const visit = async () => {
             await navigate(page, scene.route!, scene.path);
             await page.locator(scene.ready).first().waitFor();
-            await scene.prepare?.(page, gateway);
+            if (scene.id === "session-submenu") {
+              // Repeated visits retain pointer coordinates; use the keyboard path.
+              await page.locator(".chat-header-session-menu__trigger").focus();
+              await page.keyboard.press("Enter");
+              await openSessionMenuSubmenu(page, "Advanced");
+              await openSessionMenuSubmenu(page, "Icon & color");
+              await page.locator(".session-menu__appearance:visible").waitFor();
+              await page.getByRole("button", { name: "Blue", exact: true }).waitFor();
+            } else {
+              await scene.prepare?.(page, gateway);
+            }
             await settleRetention(page);
             await page.keyboard.press("Escape");
             await page.keyboard.press("Escape");

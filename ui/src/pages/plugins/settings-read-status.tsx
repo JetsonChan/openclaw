@@ -36,14 +36,9 @@ export function PluginSettingsReadStatus(props: {
     const readiness = createMemo(async () => {
       const currentError = error();
       const read = config();
-      const outcomes = await Promise.all([
-        read
-          ? Promise.race([read.completion.promise, read.invalidated.promise.then(() => null)])
-          : Promise.resolve(null),
-        Promise.resolve(schema()),
-      ]);
-      // A later write owns its own error; completed reads cannot replace it.
-      const failed = outcomes.find(
+      const [configOutcome, schemaOutcome] = await Promise.all([read?.settled, schema()]);
+      // Retired reads and later writes own separate outcomes.
+      const failed = [config() === read ? configOutcome : null, schemaOutcome].find(
         (outcome) => outcome && !outcome.ok && outcome.error === currentError,
       );
       if (failed && !failed.ok) {
