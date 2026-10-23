@@ -43,7 +43,6 @@ ui/src/pages/chat/components/chat-model-catalog-state.tsx	1
 ui/src/pages/chat/components/chat-model-picker-search.ts	1
 ui/src/pages/chat/components/chat-permission-picker.tsx	1
 ui/src/pages/chat/components/chat-position-rail-controller.ts	1
-ui/src/pages/chat/components/chat-session-rail-composer.tsx	1
 ui/src/pages/chat/components/chat-source-previews.tsx	1
 ui/src/pages/chat/session-prefetch.ts	1
 ui/src/pages/chat/solid-render-lifecycle.ts	1
