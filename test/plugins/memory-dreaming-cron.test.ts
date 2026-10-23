@@ -1,3 +1,5 @@
+import fs from "node:fs/promises";
+import path from "node:path";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import memoryCore from "../../extensions/memory-core/index.js";
 import type { OpenClawConfig } from "../../src/config/types.openclaw.js";
@@ -9,6 +11,7 @@ import { createPluginRuntimeMock } from "../../src/plugin-sdk/test-helpers/plugi
 import { createEmptyPluginRegistry } from "../../src/plugins/registry.js";
 import { startPluginServices, type PluginServicesHandle } from "../../src/plugins/services.js";
 import { createTestGatewayScheduler } from "../../src/test-utils/gateway-scheduler-clock.js";
+import { useAutoCleanupTempDirTracker } from "../helpers/temp-dir.js";
 
 const { makeStorePath } = createCronStoreHarness({ prefix: "memory-dreaming-cron-" });
 const services = new Set<PluginServicesHandle>();
@@ -34,14 +37,18 @@ afterEach(async () => {
   }
 });
 
+const tempDirs = useAutoCleanupTempDirTracker(afterEach);
+
 async function startDreaming(config: OpenClawConfig, getCronService: () => CronService) {
   const logger = createNoopLogger();
   const registry = createEmptyPluginRegistry();
+  const runtime = createPluginRuntimeMock({ config: { current: () => config } });
   memoryCore.register(
     createTestPluginApi({
+      id: "memory-core",
       config,
       logger,
-      runtime: createPluginRuntimeMock({ config: { current: () => config } }),
+      runtime,
       registerService(service) {
         registry.services.push({
           pluginId: "memory-core",
@@ -55,7 +62,7 @@ async function startDreaming(config: OpenClawConfig, getCronService: () => CronS
   );
   const handle = await startPluginServices({ scheduler, registry, config, getCronService });
   services.add(handle);
-  return { handle, logger };
+  return { handle, logger, runtime };
 }
 
 async function createScheduler(cronEnabled: boolean, owner?: string) {
@@ -165,3 +172,77 @@ it.each([true, false])(
     expect(logger.error).not.toHaveBeenCalled();
   },
 );
+
+it("keeps explicitly disabled dreaming idle through cold start, reconciliation, and restart", async () => {
+  vi.useFakeTimers();
+  const workspaceDir = tempDirs.make("memory-dreaming-disabled-");
+  const memoryPath = path.join(workspaceDir, "MEMORY.md");
+  const diaryDir = path.join(workspaceDir, "memory");
+  const diaryPath = path.join(diaryDir, "2026-10-23.md");
+  const memory = "# Memory\nThe violet telescope belongs on the library roof.\n";
+  const diary = "# Diary\nToday we watched the clouds from the library.\n";
+  await fs.mkdir(diaryDir);
+  await fs.writeFile(memoryPath, memory);
+  await fs.writeFile(diaryPath, diary);
+  const workspaceFiles = (await fs.readdir(workspaceDir, { recursive: true })).toSorted();
+  const { storePath } = await makeStorePath();
+  const enqueueSystemEvent = vi.fn();
+  const requestHeartbeat = vi.fn();
+  const runIsolatedAgentJob = vi.fn(async () => ({ status: "ok" as const }));
+  const config: OpenClawConfig = {
+    agents: {
+      ownership: "explicit",
+      defaults: { systemAgent: { agentId: "qa" } },
+      entries: { qa: { workspace: workspaceDir } },
+    },
+    cron: { enabled: true },
+    plugins: {
+      slots: { memory: "memory-core" },
+      entries: {
+        "memory-core": { enabled: true, config: { dreaming: { enabled: false } } },
+      },
+    },
+  };
+
+  // Reuse only persisted state: each cycle recreates Cron and the real plugin services.
+  for (let cycle = 0; cycle < 2; cycle += 1) {
+    const cron = new CronService({
+      scheduler,
+      nowMs: () => Date.now(),
+      storePath,
+      cronEnabled: true,
+      resolveDefaultAgentId: () => "qa",
+      log: createNoopLogger(),
+      enqueueSystemEvent,
+      requestHeartbeat,
+      runIsolatedAgentJob,
+    });
+    schedulers.add(cron);
+    const list = vi.spyOn(cron, "list");
+    const add = vi.spyOn(cron, "add");
+    const update = vi.spyOn(cron, "update");
+    await cron.start();
+    const { handle, logger, runtime } = await startDreaming(config, () => cron);
+    const startupLists = list.mock.calls.length;
+    expect(startupLists).toBeGreaterThan(0);
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect(list.mock.calls.length).toBeGreaterThan(startupLists);
+    expect(await cron.list({ includeDisabled: true })).toEqual([]);
+    expect(add).not.toHaveBeenCalled();
+    expect(update).not.toHaveBeenCalled();
+    expect(enqueueSystemEvent).not.toHaveBeenCalled();
+    expect(requestHeartbeat).not.toHaveBeenCalled();
+    expect(runIsolatedAgentJob).not.toHaveBeenCalled();
+    expect(runtime.subagent.complete).not.toHaveBeenCalled();
+    expect(runtime.subagent.run).not.toHaveBeenCalled();
+    expect(logger.error).not.toHaveBeenCalled();
+    await handle.stop();
+    services.delete(handle);
+    cron.stop();
+    await cron.waitForIdle();
+    schedulers.delete(cron);
+    expect(await fs.readFile(memoryPath, "utf8")).toBe(memory);
+    expect(await fs.readFile(diaryPath, "utf8")).toBe(diary);
+    expect((await fs.readdir(workspaceDir, { recursive: true })).toSorted()).toEqual(workspaceFiles);
+  }
+});
