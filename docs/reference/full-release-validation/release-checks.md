@@ -50,7 +50,16 @@ main lane resolves `main` once to a commit and never substitutes for release
 artifact coverage. The callee verifies downloaded bytes against these digests.
 
 The immutable reusable workflow revision is separate from the app source
-revision. Its OIDC check binds the called workflow, not the caller's authority.
+revision and also pins the maintained setup/test harness. Release lanes use the
+published app bytes; main builds its separately checked-out source commit. The
+harness installs the exact candidate (including beta versions), connects the app,
+and invokes `system.which` through the real Gateway. It does not require old
+apps to advertise the current harness's full capability inventory.
+
+Evidence names distinguish the app source kind and release tag or source SHA.
+Stable's protocol exception requires an initial fixture error with a structured
+receipt and a matching typed test failure; skips, unrelated failures, and cleanup
+errors still fail. Its OIDC check binds the called workflow, not the caller's authority.
 The workflow receives caller-scoped read permissions, no inherited secrets,
 and runs on GitHub-hosted Windows; it does not publish releases. This is
 setup/connect coverage, not MXC/AppContainer containment proof.
