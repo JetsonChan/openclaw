@@ -56,16 +56,13 @@ export abstract class ChatPaneSnapshotHydration extends ChatPaneReplyNavigation 
       connected: this.context.gateway.snapshot.phase === "connected",
       promise: reading
         .then(async (storedSnapshot) => {
-          if ((!hydration.connected && this.deferSnapshotRows) || this.routeResolutionPending) {
-            if (
-              this.routeResolutionPending &&
-              this.context.gateway.snapshot.phase !== "connected"
-            ) {
+          if (this.routeResolutionPending) {
+            if (this.context.gateway.snapshot.phase !== "connected") {
               const wait = new AbortController();
               this.chatState.addCleanup(() => wait.abort());
               await waitForGatewayClient(this.context.gateway, wait.signal);
             }
-            // Split cached rows from pane mounting and any already-delivered hello subscribers.
+            // Let hello and its subscribers finish before committing cached rows.
             await new Promise<void>((resolve) => {
               window.setTimeout(resolve, 0);
             });
@@ -73,8 +70,20 @@ export abstract class ChatPaneSnapshotHydration extends ChatPaneReplyNavigation 
           if (!isCurrent()) {
             return hydration.complete?.();
           }
-          const snapshot = mergeStoredChatSessionSnapshot(cache, state, target, storedSnapshot);
+          let snapshot = mergeStoredChatSessionSnapshot(cache, state, target, storedSnapshot);
           const boardRestored = restoreBoard(snapshot?.board);
+          if (snapshot && !hydration.connected && this.deferSnapshotRows) {
+            const gateway = this.context.gateway.snapshot;
+            if (gateway.client && gateway.phase !== "connected") {
+              await gateway.client.initialConnectSent;
+            }
+            // Keep the board's mount timing; split only cached rows after connect.
+            await new Promise<void>((resolve) => window.setTimeout(resolve, 0));
+            if (!isCurrent()) {
+              return hydration.complete?.();
+            }
+            snapshot = mergeStoredChatSessionSnapshot(cache, state, target, storedSnapshot);
+          }
           if (requests.acceptedHistory || !snapshot) {
             hydration.complete?.();
             return boardRestored;

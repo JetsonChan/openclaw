@@ -376,12 +376,6 @@ export async function loadChatRoute(
       face === "chat" &&
       parseAgentSessionKey(target.sessionKey)?.rest.startsWith("dashboard:") &&
       Boolean(sessionKeyUuid(target.sessionKey));
-    const gateway = context.gateway.snapshot;
-    if (deferSnapshotRows && gateway.client && gateway.phase !== "connected") {
-      // Match snapshot routes: send connect before mounting the cached pane.
-      await gateway.client.initialConnectSent;
-      signal.throwIfAborted();
-    }
     let defaultsKnown =
       defaultsUsable ||
       context.sessions.cachedRoutingDefaults?.scope === "per-sender" ||
