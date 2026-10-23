@@ -1224,10 +1224,17 @@ describe("scripts/lib/ci-node-test-plan.mts", () => {
 
   it("discovers only tooling files for a cold precise tooling plan", () => {
     const result = spawnNodeEvalSync(`
+      import childProcess from "node:child_process";
       import fs from "node:fs";
       import path from "node:path";
       import { syncBuiltinESMExports } from "node:module";
       let sourceReads = 0;
+      let fullInventoryReads = 0;
+      const spawnSync = childProcess.spawnSync;
+      childProcess.spawnSync = function(command, args, ...options) {
+        if (command === "git" && args?.[0] === "ls-files" && !args.includes("--")) fullInventoryReads += 1;
+        return spawnSync.call(this, command, args, ...options);
+      };
       const readFileSync = fs.readFileSync;
       fs.readFileSync = function(file, ...args) {
         const relative = path.relative(process.cwd(), String(file)).replaceAll("\\\\", "/");
@@ -1244,6 +1251,7 @@ describe("scripts/lib/ci-node-test-plan.mts", () => {
       console.log(JSON.stringify({
         importReads,
         sourceReads,
+        fullInventoryReads,
         distOwners: plan?.filter((shard) => shard.requiresDist).map((shard) => shard.groups.flatMap((group) => group.configs)).flat().sort(),
         selected: plan?.filter((shard) => !shard.requiresDist).flatMap((shard) => shard.groups?.flatMap((group) => group.includePatterns ?? []) ?? []).sort(),
       }));
@@ -1252,6 +1260,7 @@ describe("scripts/lib/ci-node-test-plan.mts", () => {
     expect(JSON.parse(result.stdout)).toEqual({
       importReads: 0,
       sourceReads: 0,
+      fullInventoryReads: 0,
       distOwners: [],
       selected: [
         "test/scripts/managed-child-process.test.ts",

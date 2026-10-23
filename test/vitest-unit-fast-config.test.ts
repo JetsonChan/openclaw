@@ -191,7 +191,7 @@ describe("unit-fast vitest lane", () => {
       unselectedFileReads: 0,
     });
     const boundedReads = expect.toSatisfy((count: number) => count >= 0 && count < 20);
-    expect(readProbe("UNIT_FAST_IO_PROBE")).toEqual([1, boundedReads, 1, 0, 0]);
+    expect(readProbe("UNIT_FAST_IO_PROBE")).toEqual([0, boundedReads, 1, 0, 0]);
     const selectedFastIncludes = [
       ["src/agents/agent-tools.deferred-followup-guidance.test.ts"],
       ["src/test-utils/temp-home.test.ts"],
@@ -354,11 +354,13 @@ describe("unit-fast vitest lane", () => {
           return readdir.apply(this, args);
         };
         const paths = await import(${JSON.stringify(moduleUrl)});
-        console.log(JSON.stringify({ files: paths.getUnitFastTestFiles(), walks }));
+        const scoped = paths.getUnitFastTestFilesForIncludePatterns(["src/hooks/**/*.test.ts"]);
+        console.log(JSON.stringify({ files: paths.getUnitFastTestFiles(), scoped, walks }));
       `);
       expect(result.status, result.stderr).toBe(0);
       const inventory = JSON.parse(result.stdout);
       expect(inventory.files).toEqual(files);
+      expect(inventory.scoped).toEqual(files);
       if (mode === "large") {
         expect(inventory.walks).toBe(0);
       } else {

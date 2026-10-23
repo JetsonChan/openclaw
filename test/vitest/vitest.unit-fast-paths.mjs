@@ -373,10 +373,11 @@ function collectRepoTestFiles(cwd, selected) {
     ? [...inventory]
         .map(normalizeRepoPath)
         .filter((file) => /^(?:src|packages|test)\//u.test(file) && file.endsWith(".test.ts"))
-    : (selected ??
-      ["src", "packages", "test"]
-        .flatMap((directory) => walkFiles(path.join(cwd, directory)))
-        .map((file) => normalizeRepoPath(path.relative(cwd, file))));
+    : selected?.every((file) => file.endsWith(".test.ts"))
+      ? selected
+      : ["src", "packages", "test"]
+          .flatMap((directory) => walkFiles(path.join(cwd, directory)))
+          .map((file) => normalizeRepoPath(path.relative(cwd, file)));
   walkedTestFilesByCwd.set(key, files);
   return files;
 }
@@ -585,11 +586,19 @@ export function getUnitFastTestFilesForIncludePatterns(includePatterns, options 
     return [];
   }
   const compiledPatterns = prepareGlobPatterns(patterns);
+  const directories = [...new Set(patterns.map(directoryPrefixForGlob))];
   const candidates = patterns.every(
     (pattern) => pattern.endsWith(".test.ts") && literalGlobPrefix(pattern) === pattern,
   )
     ? collectUnitFastCandidateInventory(cwd, patterns)
-    : collectUnitFastCandidateInventory(cwd);
+    : directories.every(Boolean)
+      ? [
+          ...new Set(
+            // Git applies --deleted's metadata filter early only for one pathspec.
+            directories.flatMap((directory) => collectUnitFastCandidateInventory(cwd, [directory])),
+          ),
+        ]
+      : collectUnitFastCandidateInventory(cwd);
 
   const files = candidates
     .filter((file) => {
