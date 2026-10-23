@@ -23,8 +23,9 @@ import { mountSolid } from "../../test-helpers/mount-solid.ts";
 import { createStorageMock } from "../../test-helpers/storage.ts";
 import { projectChatFields } from "./chat-field-projection.ts";
 import { ChatPaneRuntime } from "./chat-pane-render.ts";
-import { createPaneTestHost } from "./chat-pane-runtime.test-support.ts";
+import { createPaneTestHost, getPaneTestRuntime } from "./chat-pane-runtime.test-support.ts";
 import type { ResolvedBoardView } from "./chat-pane-shared.ts";
+import { ChatPaneStateOwner } from "./chat-pane-state-owner.ts";
 import { type ChatBoardPanel, ChatBoardResetConfirmation } from "./chat-pane-surfaces.tsx";
 import { mountBoardPanel } from "./chat-pane.test-support.ts";
 import { createInitialChatRealtimeState } from "./chat-realtime.ts";
@@ -65,6 +66,7 @@ vi.mock("../../lib/sessions/swarm-roster.ts", async (importOriginal) => {
 });
 
 type TestChatPane = HTMLElement & {
+  readonly element: HTMLElement;
   boardProvider?: BoardProvider;
   connectedClient: GatewayBrowserClient | null;
   connectionGeneration: number;
@@ -398,7 +400,7 @@ describe("chat pane board shell", () => {
     expect(pane.onFaceChange).not.toHaveBeenCalled();
   });
 
-  it("does not hydrate the swarm after becoming hidden during module loading", async () => {
+  it("ignores retired swarm imports and keeps hidden panes unhydrated", async () => {
     vi.useFakeTimers();
     const list = vi.fn().mockResolvedValue({ sessions: [] });
     const sessions = { canonicalListRevision: 0, list } as unknown as SessionCapability;
@@ -410,20 +412,50 @@ describe("chat pane board shell", () => {
       },
     } as unknown as ApplicationContext;
     pane.presentedChanged = () => undefined;
+    const retired = createTestPane(sessions);
+    const replaced = createTestPane(sessions);
+    const retiredAdmission = vi.spyOn(retired.context.connectionBootstrap, "run");
+    const replacedAdmission = vi.spyOn(replaced.context.connectionBootstrap, "run");
 
     try {
       pane.refreshSwarmRoster();
+      retired.refreshSwarmRoster();
+      replaced.refreshSwarmRoster();
       await swarmModuleImport.started;
       pane.presented = false;
+      ChatPaneStateOwner.prototype.dispose.call(getPaneTestRuntime(retired));
+      replaced.context = { ...replaced.context };
       swarmModuleImport.release();
       await import("../../lib/sessions/swarm-roster.ts");
       await Promise.resolve();
       await vi.runAllTimersAsync();
 
       expect(list).not.toHaveBeenCalled();
+      expect(retiredAdmission).not.toHaveBeenCalled();
+      expect(replacedAdmission).not.toHaveBeenCalled();
     } finally {
       vi.useRealTimers();
     }
+  });
+
+  it("releases a disposed pane's held roster refresh before the foreground becomes ready", async () => {
+    swarmModuleImport.release();
+    const pane = createTestPane();
+    const runtime = getPaneTestRuntime(pane);
+    const bootstrap = pane.context.connectionBootstrap;
+    bootstrap.setForegroundRoute("agent:main:pending");
+    pane.refreshSwarmRoster();
+    await vi.dynamicImportSettled();
+    const settled = vi.fn();
+    void bootstrap.run(runtime, async () => {}).then(settled);
+    await Promise.resolve();
+    expect(settled).not.toHaveBeenCalled();
+
+    ChatPaneStateOwner.prototype.dispose.call(runtime);
+    await Promise.resolve();
+
+    expect(settled).toHaveBeenCalledOnce();
+    expect(bootstrap.foregroundReady).toBe(false);
   });
 
   it("keeps generic child roster hydration available with default swarm configuration", async () => {

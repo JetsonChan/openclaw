@@ -328,6 +328,23 @@ describe("filtered sidebar session event refresh", () => {
     }
   });
 
+  it("releases a retired sidebar's held bootstrap refresh before the foreground becomes ready", async () => {
+    const { controller, context, disconnectHost } = createFilteredSessionController("archived");
+    const bootstrap = context.connectionBootstrap;
+    bootstrap.setForegroundRoute("agent:main:pending");
+    controller.connect();
+    const settled = vi.fn();
+    void controller.scheduleSidebarSessions().then(settled);
+    await Promise.resolve();
+    expect(settled).not.toHaveBeenCalled();
+
+    disconnectHost();
+    await Promise.resolve();
+
+    expect(settled).toHaveBeenCalledOnce();
+    expect(bootstrap.foregroundReady).toBe(false);
+  });
+
   it("keeps an owner-filtered refresh pending when the catalog agent changes", async () => {
     const { controller, context, list, selectMembership, selectAgent } =
       createFilteredSessionController("archived", 4, true);

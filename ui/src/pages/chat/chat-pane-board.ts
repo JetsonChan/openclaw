@@ -477,8 +477,11 @@ export abstract class ChatPaneBoard extends ChatPaneHistory {
     const context = this.context;
     // Load before admission so mounting cannot retire the state captured by a held import.
     void import("../../lib/sessions/swarm-roster.ts")
-      .then((swarm) =>
-        context.connectionBootstrap.run(
+      .then((swarm) => {
+        if (!this.isConnected || this.context !== context) {
+          return;
+        }
+        return context.connectionBootstrap.run(
           this,
           async () => {
             if (this.context === context) {
@@ -486,8 +489,8 @@ export abstract class ChatPaneBoard extends ChatPaneHistory {
             }
           },
           { background: true },
-        ),
-      )
+        );
+      })
       .catch(() => undefined);
   }
 
