@@ -11,13 +11,7 @@ export const channelPluginSurfaceKeys = [
   "gateway",
 ] as const;
 
-export const sessionBindingContractChannelIds = [
-  "discord",
-  "feishu",
-  "imessage",
-  "matrix",
-  "telegram",
-] as const;
+export const sessionBindingContractChannelIds = ["imessage"] as const;
 
 /** Channel id union for bundled session-binding contract fixtures. */
 export type SessionBindingContractChannelId = (typeof sessionBindingContractChannelIds)[number];

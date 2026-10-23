@@ -17,21 +17,6 @@ import {
 } from "../../../../test-utils/openclaw-test-state.js";
 import { getSessionBindingContractRegistry } from "./registry-session-binding.js";
 
-function resolveSessionBindingContractRuntimeConfig(id: string) {
-  if (id !== "discord" && id !== "matrix") {
-    return {};
-  }
-  return {
-    plugins: {
-      entries: {
-        [id]: {
-          enabled: true,
-        },
-      },
-    },
-  };
-}
-
 function installSessionBindingContractSuite(params: {
   getCapabilities: () => SessionBindingCapabilities | Promise<SessionBindingCapabilities>;
   bindAndResolve: () => Promise<SessionBindingRecord>;
@@ -82,10 +67,7 @@ export function describeSessionBindingRegistryBackedContract(id: string) {
       clearRuntimeConfigSnapshot();
       // Keep the suite hermetic; some contract helpers resolve runtime artifacts through config-aware
       // plugin boundaries, so never fall back to the developer's real ~/.openclaw/openclaw.json here.
-      const runtimeConfig = resolveSessionBindingContractRuntimeConfig(entry.id);
-      // These registry-backed contract suites intentionally exercise bundled runtime facades.
-      // Opt the bundled-runtime cases in so the activation boundary behaves like real runtime usage.
-      setRuntimeConfigSnapshot(runtimeConfig);
+      setRuntimeConfigSnapshot({});
       sessionBindingTesting.resetSessionBindingAdaptersForTests();
       await entry.beforeEach?.();
     });
