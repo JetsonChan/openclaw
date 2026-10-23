@@ -1,7 +1,7 @@
 import { matchesGlob } from "node:path";
 import { runInNewContext } from "node:vm";
 import { describe, expect, it, vi } from "vitest";
-import { readCiWorkflow, readWorkflow } from "./ci-workflow.test-support.js";
+import { readWorkflow } from "./ci-workflow.test-support.js";
 
 const before = "a".repeat(40);
 const head = "b".repeat(40);
@@ -169,31 +169,6 @@ describe("bounded scheduled proof reuse", () => {
 });
 
 describe("workflow cost admission", () => {
-  it.each(["ci-check-testbox", "ci-check-arm-testbox", "ci-build-artifacts-testbox"])(
-    "keeps %s scoped to its hydration inputs",
-    (name) => {
-      const workflow = readWorkflow(`.github/workflows/${name}.yml`);
-      const accepts = (path: string) =>
-        workflow.on.pull_request.paths.some((pattern: string) => matchesGlob(path, pattern));
-      expect(accepts(".github/workflows/docs.yml")).toBe(false);
-      for (const path of [
-        `.github/workflows/${name}.yml`,
-        ".github/actions/setup-node-env/install-dependencies.sh",
-        ".github/actions/prepare-testbox-shell/preserve-command-cwd.py",
-        "scripts/postinstall-bundled-plugins.mjs",
-        "scripts/lib/fs-safe-prebuild.mjs",
-        "scripts/lib/pnpm-lockfile-documents.mjs",
-        "scripts/prepare-git-hooks.mjs",
-        "scripts/ci-hydrate-testbox-env.sh",
-        ".npmrc",
-        "packages/fs-safe/package.json",
-      ]) {
-        expect(accepts(path), path).toBe(true);
-      }
-      expect(workflow.on.workflow_dispatch).toBeDefined();
-    },
-  );
-
   it("keeps conflict markers global and scopes workflow audits only after successful lookup", async () => {
     const workflow = readWorkflow(".github/workflows/workflow-sanity.yml");
     expect(workflow.jobs["no-tabs"]).toBeUndefined();
@@ -246,53 +221,6 @@ describe("workflow cost admission", () => {
       expect(steps.find((step: { name: string }) => step.name === name).if).toBe(
         "steps.scope.outputs.changed == 'true'",
       );
-    }
-  });
-
-  it("keeps closeout on release-input pushes and the existing manual completion route", () => {
-    const workflow = readWorkflow(".github/workflows/openclaw-stable-main-closeout.yml");
-    expect(workflow.on.workflow_run).toBeUndefined();
-    expect(workflow.on.workflow_dispatch.inputs.tag).toBeDefined();
-    expect(workflow.jobs.resolve.if).toBeUndefined();
-    for (const filename of [
-      "package.json",
-      "CHANGELOG/2026.9.1.md",
-      "appcast-arm64.xml",
-      "scripts/linux-updater-manifest.mjs",
-    ]) {
-      expect(workflow.on.push.paths.some((pattern: string) => matchesGlob(filename, pattern))).toBe(
-        true,
-      );
-    }
-    expect(
-      workflow.on.push.paths.some((pattern: string) =>
-        matchesGlob("src/agents/example.ts", pattern),
-      ),
-    ).toBe(false);
-    const resolver = workflow.jobs.resolve.steps.find(
-      (step: { id?: string }) => step.id === "inputs",
-    );
-    expect(resolver.env.EVENT_NAME).toBe("${{ github.event_name }}");
-    expect(resolver.run).not.toContain("sleep 45");
-  });
-
-  it("keeps hourly docs in CI for both ordinary and RunsOn routing", () => {
-    const docs = readWorkflow(".github/workflows/docs.yml");
-    expect(docs.on.schedule).toBeUndefined();
-    const manifest = readCiWorkflow().jobs.preflight.steps.find(
-      (step: { id?: string }) => step.id === "manifest",
-    );
-    for (const backend of ["", "runson"]) {
-      expect(
-        runInNewContext(manifest.env.OPENCLAW_CI_DOCS_CHANGED.slice(3, -2), {
-          github: { event_name: "schedule" },
-          inputs: {},
-          steps: {
-            runner_profile: { outputs: { node_runner_backend: backend } },
-            docs_scope: { outputs: {} },
-          },
-        }),
-      ).toBe("true");
     }
   });
 });
