@@ -2268,7 +2268,7 @@ jobs:
         uses: ./.ci-harness/.github/actions/setup-node-env
         with:
           cache-mode: *cache_mode
-          node-version: "24.x"
+          node-version: "24.22.1"
           install-bun: "false"
           dependency-cache: *trusted_dependency_cache
           restore-test-caches: &restore_test_caches ${{ (needs.preflight.outputs.runner_profile == 'github' || needs.preflight.outputs.runner_profile == 'hybrid') && 'true' || 'false' }}
@@ -2487,7 +2487,7 @@ jobs:
         uses: ./.ci-harness/.github/actions/setup-node-env
         with:
           cache-mode: *cache_mode
-          node-version: "24.x"
+          node-version: "24.22.1"
           install-bun: "false"
           dependency-cache: *trusted_first_attempt_dependency_cache
 
@@ -2674,7 +2674,7 @@ jobs:
         uses: ./.ci-harness/.github/actions/setup-node-env
         with:
           cache-mode: *cache_mode
-          node-version: "24.x"
+          node-version: "24.22.1"
           install-bun: "false"
           dependency-cache: *trusted_dependency_cache
 
@@ -6388,7 +6388,7 @@ jobs:
         with:
           build-all-cache-scope: full
           cache-mode: *cache_mode
-          node-version: "24.x"
+          node-version: "24.22.1"
           install-bun: "false"
           dependency-cache: *trusted_first_attempt_dependency_cache
 
