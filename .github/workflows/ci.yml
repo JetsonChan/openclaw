@@ -17,8 +17,8 @@ env:
     browser,codex,deepseek,document-extract,google,image-generation-core,imessage,
     memory-core,minimax,ollama,openai,opencode,opencode-go,volcengine,xai,zai
   # Existing packer selector for plugins excluded from the core package.
-  OPENCLAW_INTERNAL_DOCKER_BUILD_PLUGIN_IDS: imessage,deepseek,opencode,volcengine,zai
-  FORK_BUNDLE_PLUGIN_IDS: imessage,deepseek,opencode,volcengine,zai
+  OPENCLAW_INTERNAL_DOCKER_BUILD_PLUGIN_IDS: codex,imessage,deepseek,opencode,volcengine,zai
+  FORK_BUNDLE_PLUGIN_IDS: codex,imessage,deepseek,opencode,volcengine,zai
 
 jobs:
   static:
@@ -74,13 +74,15 @@ jobs:
       - name: Verify selected distribution contents
         shell: bash
         run: |
-          test -d dist/extensions/imessage
-          test -d dist/extensions/memory-core
           test ! -d dist/extensions/telegram
           test ! -d dist/extensions/discord
           tar -tzf artifacts/openclaw-yueyue.tgz > artifacts/contents.txt
-          grep -q 'package/dist/extensions/imessage/' artifacts/contents.txt
-          grep -q 'package/dist/extensions/memory-core/' artifacts/contents.txt
+          IFS=',' read -ra ids <<< "$OPENCLAW_BUNDLED_PLUGIN_BUILD_IDS"
+          for id in "${ids[@]}"; do
+            id="$(echo "$id" | tr -d '[:space:]')"
+            test -d "dist/extensions/$id"
+            grep -q "package/dist/extensions/$id/" artifacts/contents.txt
+          done
           if grep -qE 'package/dist/extensions/(telegram|discord|feishu|slack|whatsapp|signal)/' artifacts/contents.txt; then
             echo "non-target channel was packaged" >&2
             exit 1
