@@ -1,23 +1,9 @@
-// Registry contract tests cover shared channel plugin registry contract behavior.
+// Registry contract tests cover the retained channel session-binding surface.
 import { describe, expect, it } from "vitest";
 import { sessionBindingContractChannelIds } from "./test-helpers/manifest.js";
 
-const discordSessionBindingAdapterChannels = ["discord"] as const;
-
 describe("channel contract registry", () => {
-  function expectSessionBindingCoverage(expectedChannelIds: readonly string[]) {
-    const registeredIds = new Set<string>(sessionBindingContractChannelIds);
-    for (const expectedChannelId of expectedChannelIds) {
-      expect(registeredIds.has(expectedChannelId)).toBe(true);
-    }
-  }
-
-  it.each([
-    {
-      name: "keeps core session binding coverage aligned with built-in adapters",
-      expectedChannelIds: [...discordSessionBindingAdapterChannels, "telegram"],
-    },
-  ] as const)("$name", ({ expectedChannelIds }) => {
-    expectSessionBindingCoverage(expectedChannelIds);
+  it("keeps session binding coverage aligned with the retained iMessage adapter", () => {
+    expect(sessionBindingContractChannelIds).toEqual(["imessage"]);
   });
 });
