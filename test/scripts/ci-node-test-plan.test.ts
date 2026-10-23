@@ -70,10 +70,7 @@ import { createInfraVitestConfig } from "../vitest/vitest.infra.config.ts";
 import { createRuntimeConfigVitestConfig } from "../vitest/vitest.runtime-config.config.ts";
 import { startupCorpusTestFiles } from "../vitest/vitest.startup-corpus-paths.mjs";
 import { fullSuiteVitestShards } from "../vitest/vitest.test-shards.mjs";
-import {
-  uiE2ePrebuiltParallelTestFiles,
-  uiE2eRealGatewayTestFiles,
-} from "../vitest/vitest.ui-paths.mjs";
+import * as uiPaths from "../vitest/vitest.ui-paths.mjs";
 import {
   getUnitFastIsolatedTestFiles,
   getUnitFastTimerTestFiles,
@@ -91,6 +88,7 @@ import {
 } from "./ci-node-test-plan.test-support.js";
 
 const tempDirs = useAutoCleanupTempDirTracker(afterEach);
+const { uiE2ePrebuiltParallelTestFiles, uiE2eRealGatewayTestFiles } = uiPaths;
 
 function required<T>(value: T | null | undefined) {
   return expectDefined(value, "required test fixture");
@@ -146,6 +144,8 @@ function mockProject(
   timings: Readonly<Record<string, number>>,
 ) {
   vi.resetModules();
+  // Synthetic packing fixtures reuse the actual suite inventory instead of rediscovering UI files.
+  mockFixture("ui", () => uiPaths);
   mockPlanShards(() => [fixtureShard(name, [config])]);
   mockTrackedFiles((candidate) => (candidate === root ? files : []));
   mockPlanTimings(() => timings);
@@ -211,6 +211,7 @@ const fixtureModuleIds = {
   fast: "../vitest/vitest.unit-fast-paths.mjs",
   database: "../vitest/vitest.database-worker-core-paths.mjs",
   inventory: "../../scripts/lib/ci-node-test-inventory.mts",
+  ui: "../vitest/vitest.ui-paths.mjs",
 } as const;
 type FixtureModules = {
   shards: typeof import("../vitest/vitest.test-shards.mjs");
@@ -221,6 +222,7 @@ type FixtureModules = {
   fast: typeof import("../vitest/vitest.unit-fast-paths.mjs");
   database: typeof import("../vitest/vitest.database-worker-core-paths.mjs");
   inventory: typeof nodeTestInventory;
+  ui: typeof uiPaths;
 };
 type FixtureOwner = keyof FixtureModules;
 function mockFixture<K extends FixtureOwner>(
@@ -235,7 +237,7 @@ function mockFixture<K extends FixtureOwner>(
 }
 
 function resetPlanMocks(extraMocks: readonly FixtureOwner[]) {
-  for (const owner of [...extraMocks, "timings", "files", "shards"] as const) {
+  for (const owner of [...extraMocks, "timings", "files", "shards", "ui"] as const) {
     vi.doUnmock(fixtureModuleIds[owner]);
   }
   vi.resetModules();
