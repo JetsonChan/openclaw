@@ -40,6 +40,8 @@ jobs:
       - run: pnpm tsgo:extensions
       - run: pnpm test test/scripts/bundled-plugin-assets.test.ts test/scripts/native-protocol-artifact.test.ts packages/gateway-protocol/src/native-protocol-levels.guard.test.ts --maxWorkers=1
       - run: pnpm test test/scripts/ci-workflow-guards.test.ts test/scripts/ancillary-workflow-concurrency.test.ts test/scripts/ci-workflow-cost.test.ts test/scripts/ci-workflow-evidence.test.ts test/scripts/ci-workflow-planning.test.ts test/scripts/ci-workflow-native-generated.test.ts --maxWorkers=1
+      - run: pnpm test test/scripts/eager-import-closure.test.ts -t "PR wrapper inventory" --maxWorkers=1
+      - run: pnpm test extensions/qa-lab/src/scenario-catalog.test.ts extensions/qa-lab/src/profile-selection.test.ts extensions/qa-lab/src/live-transports/cli.test.ts extensions/qa-lab/src/mantis/desktop-browser-smoke.runtime.test.ts extensions/qa-lab/src/mantis/visual-task.runtime.test.ts --maxWorkers=1
       - run: pnpm test:contracts:channels
       - run: pnpm test:contracts:plugins
       - run: pnpm test:extension imessage
