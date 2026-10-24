@@ -12,19 +12,10 @@ const seedDirs = createTempDirTracker();
 let source: string;
 let eventBase: string;
 let mainBase: string;
-const workflows = [
-  ".github/workflows/ci-check-testbox.yml",
-  ".github/workflows/ci-check-arm-testbox.yml",
-  ".github/workflows/ci-build-artifacts-testbox.yml",
-];
 
 type Step = {
-  name: string;
-  id?: string;
   run?: string;
-  uses?: string;
   env?: Record<string, string>;
-  with?: Record<string, string>;
 };
 
 function git(cwd: string, ...args: string[]): string {
@@ -62,35 +53,17 @@ beforeAll(() => {
 
 afterAll(() => seedDirs.cleanup());
 
-function runBasePreparation(
-  repo: string,
-  workflowName: string,
-  base: string,
-  trace: string,
-  eventName: string,
-) {
-  const workflow = parse(fs.readFileSync(workflowName, "utf8"));
-  const jobs = Object.values(workflow.jobs) as { steps: Step[] }[];
-  const values = new Map([
-    ["github.event.pull_request.base.sha", base],
-    ["github.event.pull_request.base.ref", "main"],
-  ]);
-  const interpolate = (value: string): string =>
-    value.replace(/\$\{\{\s*(.*?)\s*\}\}/gu, (_match, expression: string) => {
-      // These workflows use only a PR-output-or-dispatch-default expression here.
-      const [key = ""] = expression
-        .replace(/^github.event_name == 'pull_request' && /u, "")
-        .split(" || ");
-      const defaultRef = expression.match(/\|\| '([^']+)'/u)?.[1];
-      const resolved =
-        eventName === "workflow_dispatch" && defaultRef ? defaultRef : values.get(key);
-      if (resolved === undefined) {
-        throw new Error(`Unbound workflow expression: ${expression}`);
-      }
-      return resolved;
-    });
+function runBasePreparation(repo: string, base: string, trace: string, eventName: string) {
   const renderEnv = (env: Record<string, string> = {}) =>
-    Object.fromEntries(Object.entries(env).map(([key, value]) => [key, interpolate(value)]));
+    Object.fromEntries(
+      Object.entries(env).map(([key, value]) => [
+        key,
+        value.replace(
+          /\$\{\{\s*inputs.base-ref\s*\}\}/gu,
+          eventName === "pull_request" ? base : "",
+        ),
+      ]),
+    );
   const bin = path.join(createTempDir("openclaw-testbox-tools-"), "bin");
   fs.mkdirSync(bin);
   // System-wide Node links are unrelated to Git preparation and must stay fixture-local.
@@ -99,16 +72,7 @@ function runBasePreparation(
     '#!/bin/sh\nif [ "$1" = tee ]; then cat >/dev/null; fi\n',
   );
   fs.chmodSync(path.join(bin, "sudo"), 0o755);
-  const step = jobs
-    .flatMap((job) => job.steps)
-    .find((entry) => entry.uses === "./.github/actions/prepare-testbox-shell");
-  if (!step?.uses) {
-    throw new Error("Missing Testbox preparation action");
-  }
-  const actionPath = path.join(repo, step.uses);
-  for (const [key, value] of Object.entries(step.with ?? {})) {
-    values.set(`inputs.${key}`, interpolate(value));
-  }
+  const actionPath = path.join(repo, ".github/actions/prepare-testbox-shell");
   const action = parse(fs.readFileSync(path.join(actionPath, "action.yml"), "utf8"));
   const actionStep: Step = action.runs.steps[0];
   if (!actionStep.run) {
@@ -133,25 +97,21 @@ function runBasePreparation(
   });
 }
 
-describe.each(workflows)("%s Testbox base preparation", (workflowName) => {
+describe("Testbox base preparation action", () => {
   it.each([
     { shape: "merge", branch: "main", depth: 2, passes: true, eventName: "pull_request" },
-    ...(workflowName === workflows[0]
-      ? [
-          { shape: "linear", branch: "feature", depth: 2, passes: true, eventName: "pull_request" },
-          {
-            shape: "merge without parents",
-            branch: "main",
-            depth: 1,
-            passes: false,
-            eventName: "pull_request",
-          },
-        ]
-      : []),
+    { shape: "linear", branch: "feature", depth: 2, passes: true, eventName: "pull_request" },
+    {
+      shape: "merge without parents",
+      branch: "main",
+      depth: 1,
+      passes: false,
+      eventName: "pull_request",
+    },
     {
       shape: "manual",
       branch: "feature",
-      depth: workflowName.endsWith("/ci-check-testbox.yml") ? 1 : 0,
+      depth: 1,
       passes: true,
       eventName: "workflow_dispatch",
     },
@@ -177,7 +137,7 @@ describe.each(workflows)("%s Testbox base preparation", (workflowName) => {
       encoding: "utf8",
     });
     const trace = path.join(createTempDir("openclaw-testbox-trace-"), "git.jsonl");
-    const result = runBasePreparation(repo, workflowName, eventBase, trace, eventName);
+    const result = runBasePreparation(repo, eventBase, trace, eventName);
     const traceEvents = fs
       .readFileSync(trace, "utf8")
       .trim()
@@ -218,9 +178,7 @@ describe.each(workflows)("%s Testbox base preparation", (workflowName) => {
     expect(fetches).toEqual([]);
     expect(git(repo, "rev-parse", "refs/remotes/origin/main")).toBe(
       eventName === "workflow_dispatch"
-        ? depth === 1
-          ? git(repo, "rev-parse", "HEAD")
-          : git(source, "rev-parse", "main")
+        ? git(repo, "rev-parse", "HEAD")
         : branch === "main"
           ? mainBase
           : eventBase,

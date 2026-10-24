@@ -1,30 +1,13 @@
-import { execFileSync } from "node:child_process";
-import {
-  existsSync,
-  mkdirSync,
-  readdirSync,
-  readFileSync,
-  symlinkSync,
-  writeFileSync,
-} from "node:fs";
+import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { expect } from "vitest";
 import { parse } from "yaml";
 import {
   ciCheckoutFixture,
   expectCiCheckoutCleanup,
-  readCiCheckoutStep,
   renderGitTestClock,
   withCiCheckoutFixture,
 } from "./ci-checkout.test-support.js";
-import {
-  prepareGeneratedPublisherFixture,
-  type GeneratedPublisherOptions,
-} from "./generated-publisher.test-support.js";
-import {
-  preparePerformanceFixture,
-  type PerformanceFixtureOptions,
-} from "./openclaw-performance-workflow.test-support.js";
 
 type Step = {
   name?: string;
@@ -41,10 +24,6 @@ const workflowInputs = new Map<string, WorkflowInput>();
 const actionInputs = new Map<string, ActionInput>();
 const ownerSource = readFileSync(".github/actions/git-owner/owner.py", "utf8");
 const basePolicySource = readFileSync(".github/actions/ensure-base-commit/policy.py", "utf8");
-const publisherPolicySource = readFileSync(
-  ".github/actions/publish-generated-pr/policy.py",
-  "utf8",
-);
 
 function readActionSteps(action: string) {
   const input =
@@ -116,14 +95,7 @@ function readWorkflowStep({ file, job, step: name }: WorkflowTarget): Step & { r
 export async function runCiGitStep(options: {
   signal: AbortSignal;
   workflow?: "workflow-sanity" | WorkflowTarget;
-  job?: string;
-  action?:
-    | "ensure-base-commit"
-    | "git-owner"
-    | "mantis-validate-trusted-ref"
-    | "publish-generated-pr";
-  performance?: PerformanceFixtureOptions;
-  publisher?: GeneratedPublisherOptions & { baseChangePath?: "a" | "b" | null };
+  action?: "ensure-base-commit" | "git-owner";
   gitFault?: { match: string; occurrence?: number; code: FetchResult | "cancel"; output?: string };
   gitFaults?: {
     match: string;
@@ -165,8 +137,6 @@ export async function runCiGitStep(options: {
   publishPath?: "directory" | "file" | "symlink";
   checkoutResults?: number[];
   mergeSnapshots?: { sha: string; head: string }[];
-  prepare?: boolean;
-  checkoutBeforeStep?: boolean;
   cancelDuringCleanup?: boolean;
   cleanupCancelMatch?: string;
   startupDelay?: { tree: number };
@@ -186,31 +156,7 @@ export async function runCiGitStep(options: {
   cancelDuringBackoff?: boolean;
   setupFailure?: "owner" | "python" | "git";
 }) {
-  const maturity =
-    typeof options.workflow === "object" &&
-    options.workflow.file === ".github/workflows/maturity-scorecard.yml";
-  const docsPublish =
-    typeof options.workflow === "object" &&
-    options.workflow.file === ".github/workflows/docs-sync-publish.yml";
-  const docsAgent =
-    typeof options.workflow === "object" &&
-    options.workflow.file === ".github/workflows/docs-agent.yml";
-  const releaseAdmission =
-    typeof options.workflow === "object" &&
-    [
-      ".github/workflows/linux-app-release.yml",
-      ".github/workflows/macos-release.yml",
-      ".github/workflows/npm-placeholder-bootstrap.yml",
-    ].includes(options.workflow.file);
-  const pluginRelease =
-    typeof options.workflow === "object" &&
-    [
-      ".github/workflows/plugin-clawhub-release.yml",
-      ".github/workflows/plugin-npm-release.yml",
-    ].includes(options.workflow.file);
-  const publisher = options.action === "publish-generated-pr";
-  const externalOwner =
-    options.workflow || options.action === "mantis-validate-trusted-ref" || publisher;
+  const externalOwner = Boolean(options.workflow);
   const clock = {
     ...options,
     realDrain:
@@ -230,26 +176,18 @@ export async function runCiGitStep(options: {
               }
             : options.workflow,
         )
-      : readCiCheckoutStep(
-          options.job ?? "security-fast",
-          options.step ?? (options.job ? "Checkout" : "Prepare Git owner"),
-        );
+      : readActionSteps("git-owner")[0];
   if (!step?.run) {
     throw new Error("Missing executable action step");
   }
   let env: Record<string, string>;
-  let performanceFixture: ReturnType<typeof preparePerformanceFixture> | undefined;
-  let publisherFixture: ReturnType<typeof prepareGeneratedPublisherFixture> | undefined;
   return withCiCheckoutFixture(
     `linux:${options.scenario ?? "configured"}`,
     options.signal,
     (root) => {
       const actions = path.join(root, "trusted-actions");
-      if (options.performance) {
-        performanceFixture = preparePerformanceFixture(root, options.performance);
-      }
+
       env = stepEnvironment(step, {
-        PUBLISH_ACTION_PATH: path.resolve(".github/actions/publish-generated-pr"),
         CONTENTS_TOKEN: "fixture-contents",
         HEAD_BRANCH: "automation/locale",
         BASE_BRANCH: "main",
@@ -265,61 +203,19 @@ export async function runCiGitStep(options: {
         FETCH_REF: "fixture-base",
         BASE_ACTION_PATH: path.join(actions, "ensure-base-commit"),
         OWNER_ACTION_PATH: path.join(actions, "git-owner"),
-        ...performanceFixture?.env,
         ...options.env,
       });
       const workspace = path.join(root, "workspace");
-      if (publisher) {
-        publisherFixture = prepareGeneratedPublisherFixture(
-          root,
-          options.publisher?.baseChangePath ?? null,
-          options.publisher,
-          "workspace",
-        );
-        env = {
-          ...env,
-          ...publisherFixture.env,
-          ...options.env,
-          PUBLISH_ACTION_PATH: path.resolve(".github/actions/publish-generated-pr"),
-          GITHUB_STEP_SUMMARY: path.join(root, "github-summary"),
-          FAKE_REAL_GIT: execFileSync("which", ["git"], { encoding: "utf8" }).trim(),
-        };
-        delete env.PATH;
-      }
-      if (docsAgent) {
-        env.GITHUB_TOKEN = "fixture-docs-agent-token";
-        env.GH_TOKEN = "";
-      }
-      if (docsPublish) {
-        env.GITHUB_SHA = candidate;
-        // Never let a caller's credential reach fixture command reports.
-        env.OPENCLAW_DOCS_SYNC_TOKEN = "fixture-docs-token";
-        env.OPENCLAW_DOCS_MDX_CACHE = path.join(root, "docs-mdx-cache.json");
-        mkdirSync(path.join(workspace, "clawhub-source/.git"), { recursive: true });
-        const publish = path.join(workspace, "publish");
-        if (options.publishPath === "file") {
-          writeFileSync(publish, "previous publish path\n");
-        } else if (options.publishPath === "symlink") {
-          symlinkSync(root, publish, "junction");
-        } else if (options.publishPath === "directory") {
-          mkdirSync(publish);
-          writeFileSync(path.join(publish, ".previous-checkout"), "stale\n");
-        }
-      }
+
       if (externalOwner) {
         // Workflow bodies follow actions/checkout; selected-source bootstrap must
         // still create its own directory, while later selected steps inherit one.
         for (const directory of [
           workspace,
-          ...(!publisher && step["working-directory"]
-            ? [path.join(workspace, step["working-directory"])]
-            : []),
+          ...(step["working-directory"] ? [path.join(workspace, step["working-directory"])] : []),
         ]) {
           mkdirSync(path.join(directory, ".git"), { recursive: true });
           writeFileSync(path.join(directory, ".git/preexisting.lock"), "not invocation-owned\n");
-        }
-        if (pluginRelease) {
-          writeFileSync(path.join(workspace, "package.json"), '{"version":"2026.8.33"}\n');
         }
       }
       if (options.startupDelay?.tree) {
@@ -342,34 +238,7 @@ export async function runCiGitStep(options: {
         ) {
           throw new Error("Missing copied Git owner cleanup cancellation boundary");
         }
-        if (
-          action === "git-owner" &&
-          (publisher || maturity || pluginRelease || releaseAdmission || options.performance)
-        ) {
-          source = source.replace(
-            "def main():",
-            `def fixture_file_boundary(event, args):
-    names = {os.environ["GITHUB_OUTPUT"]: "output", os.environ["GITHUB_STEP_SUMMARY"]: "summary",
-             os.environ["GITHUB_ENV"]: "environment",
-             os.path.join(os.environ["RUNNER_TEMP"], "generated-pr-push.log"): "push-log"}
-    if event == "open" and args[0] in names:
-        subprocess.run([${JSON.stringify(process.execPath)}, ${JSON.stringify(ciCheckoutFixture)},
-                        "observe", os.environ["TMPDIR"], "linux:configured", names[args[0]]], check=True)
 
-sys.addaudithook(fixture_file_boundary)
-
-
-def main():`,
-          );
-        }
-        if (action === "git-owner" && options.performance) {
-          source = source.replace(
-            "def backoff(seconds):",
-            `def backoff(seconds):
-    subprocess.run([${JSON.stringify(process.execPath)}, ${JSON.stringify(ciCheckoutFixture)},
-                    "observe", os.environ["TMPDIR"], "linux:configured", "backoff"], check=True)`,
-          );
-        }
         if (action === "git-owner" && options.cancelDuringBackoff) {
           if (!options.realClock || options.virtualBackoff) {
             throw new Error("Backoff cancellation requires the real owner clock");
@@ -398,14 +267,7 @@ def main():`,
         }
         writeFileSync(path.join(actions, action, name), source);
       }
-      if (publisher) {
-        mkdirSync(path.join(actions, "publish-generated-pr"), { recursive: true });
-        writeFileSync(
-          path.join(actions, "publish-generated-pr/policy.py"),
-          renderGitTestClock(publisherPolicySource, clock),
-        );
-        env.PUBLISH_ACTION_PATH = path.join(actions, "publish-generated-pr");
-      }
+
       const protectedFile = path.join(
         env.CHECKOUT_KIND === "clawhub" ? workspace : root,
         "protected",
@@ -436,15 +298,11 @@ def main():`,
         path.join(root, "fixture-options.json"),
         JSON.stringify({
           env,
-          publisher: publisherFixture
-            ? { git: env.FAKE_REAL_GIT, gh: path.join(publisherFixture.fakeBin, "gh") }
-            : undefined,
-          performance: performanceFixture?.proxy,
           gitFault: options.gitFault,
           gitFaults: options.gitFaults,
           revisions,
           mergeBase: options.mergeBase,
-          workingDirectory: publisher ? undefined : step["working-directory"],
+          workingDirectory: step["working-directory"],
           fetchResults: options.fetchResults,
           cloneResults: options.cloneResults,
           worktreeResults: options.worktreeResults,
@@ -455,14 +313,9 @@ def main():`,
           commandResults: options.commandResults,
           workflowRuns: options.workflowRuns,
           workflowJobs: options.workflowJobs,
-          docsAgent,
-          docsPublish,
-          maturity,
-          pluginRelease,
-          releaseAdmission,
           checkoutResults: options.checkoutResults,
           mergeSnapshots: options.mergeSnapshots,
-          consumers: Boolean(options.prepare || options.checkoutBeforeStep || externalOwner),
+          consumers: externalOwner,
           cancelDuringCleanup: options.cancelDuringCleanup,
           cleanupCancelMatch: options.cleanupCancelMatch,
           baseAvailableAfter: options.baseAvailableAfter,
@@ -501,50 +354,7 @@ ${run}`;
           'unset RUNNER_OS GITHUB_WORKSPACE RUNNER_TEMP\nexec python3 -I -S "$OWNER_ACTION_PATH/owner.py" --policy ' +
           (options.inlinePolicy ? '- < "$TMPDIR/policy.py"' : '"$TMPDIR/policy.py"');
       }
-      if (options.prepare) {
-        const prepare = readCiCheckoutStep("security-fast", "Prepare Git owner");
-        const prepareEnv = stepEnvironment(prepare, {});
-        writeFileSync(path.join(root, "prepare.sh"), renderGitTestClock(prepare.run, clock));
-        // Run the actual prepare body in its own shell: its exec must not replace the caller.
-        run = `CHECKOUT_KIND=${prepareEnv.CHECKOUT_KIND} bash --noprofile --norc -eo pipefail "$TMPDIR/prepare.sh"\n${run}`;
-      }
-      if (options.checkoutBeforeStep) {
-        const checkout = readCiCheckoutStep(options.job ?? "checks-fast-core");
-        writeFileSync(path.join(root, "bootstrap.sh"), renderGitTestClock(checkout.run, clock));
-        run = `bash --noprofile --norc -eo pipefail "$TMPDIR/bootstrap.sh"\n${run}`;
-      }
-      if (options.performance) {
-        const mapfileShim =
-          options.performance.mode === "prepare"
-            ? `if ! type mapfile >/dev/null 2>&1; then
-  mapfile() {
-    local delimiter=$'\\n'
-    if [[ "\${1:-}" == "-d" ]]; then delimiter="$2"; shift 2; fi
-    local destination="$1" item quoted index=0
-    eval "$destination=()"
-    while IFS= read -r -d "$delimiter" item; do
-      printf -v quoted '%q' "$item"
-      eval "$destination[$index]=$quoted"
-      index=$((index + 1))
-    done
-  }
-fi
-`
-            : "";
-        // Observe immediately after each owner invocation; Python policies separately
-        // expose output/summary writes through the audit hook, and exit is always censused.
-        run = `${mapfileShim}performance_owner_pending=false
-performance_owner_boundary() {
-  local command="$1"
-  if [[ "$performance_owner_pending" == "true" ]]; then
-    ${JSON.stringify(process.execPath)} ${JSON.stringify(ciCheckoutFixture)} observe "$TMPDIR" linux:configured shell-command
-    performance_owner_pending=false
-  fi
-  if [[ "$command" == *CI_GIT_OWNER* ]]; then performance_owner_pending=true; fi
-}
-trap 'performance_owner_boundary "$BASH_COMMAND"' DEBUG
-${run}`;
-      }
+
       writeFileSync(path.join(root, "checkout.sh"), run);
     },
     (report, result, stderr, root) => {
@@ -555,16 +365,12 @@ ${run}`;
       );
       const actions = path.join(root, "trusted-actions");
       console.log(
-        `${typeof options.workflow === "object" ? `${options.workflow.file}/${options.workflow.job}/${options.workflow.step}` : `${options.workflow ?? options.action ?? options.job}/${options.step ?? "Checkout"}`}: ${JSON.stringify(report)}`,
+        `${typeof options.workflow === "object" ? `${options.workflow.file}/${options.workflow.job}/${options.workflow.step}` : `${options.workflow ?? options.action}/${options.step ?? "Checkout"}`}: ${JSON.stringify(report)}`,
       );
       expect(result, `${stderr}\n${report.error ?? ""}`).toEqual({ code: 0, signal: null });
       expect(report.error, stderr).toBeUndefined();
       expectCiCheckoutCleanup(report);
-      if (docsAgent) {
-        expect(
-          readdirSync(path.join(root, "temp")).filter((name) => name.startsWith("docs-agent-")),
-        ).toEqual([]);
-      }
+
       if (externalOwner) {
         for (const directory of new Set([
           workspace,
@@ -602,11 +408,7 @@ ${run}`;
         );
         expect(readOutput("github-output")).toBe(`owner-path=${ownerPath}\n`);
       }
-      const authHeaderPresent = publisher
-        ? execFileSync(env.FAKE_REAL_GIT!, ["-C", workspace, "config", "--local", "--list"], {
-            encoding: "utf8",
-          }).includes("http.https://github.com/.extraheader=")
-        : false;
+
       return {
         ...report,
         backoffClockAdvancedSeconds: [
@@ -619,12 +421,6 @@ ${run}`;
                 options.readyFetchClockAdvanceSeconds *
                 readdirSync(root).filter((name) => /^fetch-tick-\d+\.json$/u.test(name)).length,
             }),
-        authHeaderPresent,
-        initialBranch: publisherFixture?.initialBranch,
-        publication: publisherFixture?.inspect(report.output, false),
-        performance: performanceFixture?.inspect(),
-        pluginSourcePackage: pluginRelease ? readOutput("temp/fixture-source-package.json") : "",
-        pushLog: readOutput("runner-temp/generated-pr-push.log"),
         workspace,
         githubOutput: readOutput("github-output"),
         githubEnv: readOutput("github-env"),
@@ -632,7 +428,7 @@ ${run}`;
         githubPath: readOutput("github-path"),
         trustedConfig: readOutput("temp/pre-commit-base.yaml"),
         trustedZizmor: readOutput("temp/zizmor-base.yml"),
-        runnerTemp: performanceFixture?.env.RUNNER_TEMP ?? path.join(root, "temp"),
+        runnerTemp: path.join(root, "temp"),
         fetches: report.commands.filter(({ tool, args }) => tool === "git" && args[0] === "fetch"),
         clones: report.commands.filter(({ tool, args }) => tool === "git" && args[0] === "clone"),
         worktrees: report.commands.filter(

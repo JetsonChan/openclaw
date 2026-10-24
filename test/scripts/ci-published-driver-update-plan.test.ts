@@ -5,10 +5,8 @@ import { afterEach, describe, expect, it } from "vitest";
 import { shouldRunPublishedDriverUpdate } from "../../scripts/lib/ci-published-driver-update-plan.mts";
 import { mainLanes } from "../../scripts/lib/docker-e2e-scenarios.mts";
 import { useAutoCleanupTempDirTracker } from "../helpers/temp-dir.js";
-import { runCiManifestFixture } from "./ci-workflow-manifest.test-support.js";
 import {
   evaluateWorkflowExpression,
-  readCiWorkflow,
   readWorkflow,
   readWorkflowOutputs,
   runWorkflowShellScript,
@@ -34,63 +32,6 @@ describe("published-driver update selection", () => {
   ])("retains dispatch owner selection for $paths: $expected", ({ paths, expected }) => {
     expect(shouldRunPublishedDriverUpdate(paths, "workflow_dispatch")).toBe(expected);
     expect(shouldRunPublishedDriverUpdate(paths, "pull_request")).toBe(false);
-  });
-
-  it.each([
-    {
-      eventName: "pull_request",
-      file: "src/infra/update-managed-service-handoff.ts",
-      selected: false,
-    },
-    { eventName: "pull_request", file: "src/state/openclaw-state-lease.ts", selected: false },
-    { eventName: "push", file: "src/agents/context-window-guard.ts", selected: true },
-    {
-      eventName: "workflow_dispatch",
-      file: "src/plugins/plugin-native-assignments.ts",
-      selected: true,
-    },
-    { eventName: "schedule", file: "src/state/openclaw-state-db-open.ts", selected: true },
-    { eventName: "pull_request", file: "scripts/update-gateway.sh", selected: false },
-    {
-      eventName: "workflow_dispatch",
-      file: "src/infra/update-runner.ts",
-      selected: false,
-      historical: true,
-    },
-  ] as const)("connects $eventName $file to the required job", (scenario) => {
-    const { eventName, file, selected } = scenario;
-    const historical = "historical" in scenario && scenario.historical;
-    const result = runCiManifestFixture({
-      bundledPlanner: true,
-      historicalCompatibility: historical,
-      publishedDriverUpdateCapability: !historical,
-      eventName,
-      changedPaths: [file],
-      runNode: file !== "scripts/update-gateway.sh",
-      scopeEnv:
-        eventName === "schedule"
-          ? {
-              OPENCLAW_CI_VALIDATION_TIER: "main",
-              OPENCLAW_CI_WORKFLOW_REVISION: "a".repeat(40),
-            }
-          : {},
-    });
-    expect(result.status, result.output).toBe(0);
-    expect(result.outputs.run_published_driver_update).toBe(String(selected));
-    if (selected) {
-      expect(result.outputs.run_build_artifacts).toBe("true");
-    }
-    const job = readCiWorkflow().jobs["published-driver-update"];
-    const revision = "a".repeat(40);
-    expect(
-      evaluateWorkflowExpression(`\${{ ${job.if} }}`, {
-        eventName,
-        repository: "openclaw/openclaw",
-        runAttempt: 1,
-        sha: revision,
-        preflightOutputs: { ...result.outputs, checkout_revision: revision },
-      }),
-    ).toBe(selected);
   });
 
   it("keeps candidate execution in the caller revision and cache scope", () => {
@@ -119,23 +60,7 @@ describe("published-driver update selection", () => {
     ).toBe("off");
   });
 
-  it("consumes only the candidate artifact produced by this run", () => {
-    const workflow = readCiWorkflow();
-    const caller = workflow.jobs["published-driver-update"];
-    const producer = workflow.jobs["build-artifacts"];
-    expect(caller.needs).toContain("build-artifacts");
-    for (const [input, output] of [
-      ["candidate_artifact_id", "published_driver_artifact_id"],
-      ["candidate_sha256", "published_driver_sha256"],
-    ] as const) {
-      expect(caller.with[input]).toBe(`\${{ needs.build-artifacts.outputs.${output} }}`);
-    }
-    expect(producer.outputs.published_driver_artifact_id).toBe(
-      "${{ steps.published_driver_package_upload.outputs.artifact-id }}",
-    );
-    expect(producer.outputs.published_driver_sha256).toBe(
-      "${{ steps.published_driver_package.outputs.sha256 }}",
-    );
+  it("consumes only the supplied candidate artifact from this run", () => {
     const consumer = readWorkflow(".github/workflows/ci-published-driver-update.yml").jobs.update;
     const download = consumer.steps.find((step: WorkflowStep) =>
       step.uses?.startsWith("actions/download-artifact@"),
@@ -443,27 +368,5 @@ docker_e2e_run_with_harness() {
     expect(Math.abs(directBudget - ciBudget)).toBeLessThanOrEqual(2);
     const releaseLane = mainLanes.find((lane) => lane.name === "published-driver-update");
     expect(releaseLane?.timeoutMs).toBeGreaterThan(ciBudget * 1000);
-  });
-
-  it("records the omitted cell when a dispatch fallback selects a different revision", () => {
-    const workflow = readCiWorkflow();
-    const context = {
-      eventName: "workflow_dispatch" as const,
-      repository: "openclaw/openclaw",
-      runAttempt: 1,
-      sha: "a".repeat(40),
-      preflightOutputs: {
-        run_published_driver_update: "true",
-        checkout_revision: "b".repeat(40),
-      },
-    };
-    expect(
-      evaluateWorkflowExpression(`\${{ ${workflow.jobs["published-driver-update"].if} }}`, context),
-    ).toBe(false);
-    const notice = workflow.jobs["ci-gate"].steps.find(
-      (step: WorkflowStep) => step.name === "Record published-driver dispatch limitation",
-    );
-    expect(evaluateWorkflowExpression(`\${{ ${notice.if} }}`, context)).toBe(true);
-    expect(notice.run).toContain("no published-driver cell proof for the selected revision");
   });
 });

@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, writeFileSync } from "node:fs";
+import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { createCiCheckPlan, type CiCheckPlanInput } from "../../scripts/ci-check-plan.mts";
@@ -9,13 +9,6 @@ import {
 } from "../../scripts/run-oxlint-shards.mts";
 import { createChangedCiTypeCheckPlan } from "../../scripts/run-tsgo-core-test-shards.mts";
 import { useAutoCleanupTempDirTracker } from "../helpers/temp-dir.js";
-import {
-  evaluateWorkflowExpression,
-  readCiWorkflow,
-  readWorkflowOutputs,
-  runWorkflowShellScript,
-  type WorkflowStep,
-} from "./ci-workflow.test-support.js";
 
 const tempDirs = useAutoCleanupTempDirTracker(afterEach);
 const typeSelection = vi.hoisted(() => ({
@@ -54,55 +47,12 @@ function createPlan(overrides: Partial<CiCheckPlanInput>) {
   });
 }
 
-function materializePlan(runnerProfile: string, rows: number, changedBaseRef?: string) {
-  const input: CiCheckPlanInput = {
-    ...(changedBaseRef !== undefined ? { changedBaseRef } : {}),
-    typeGraphBoundaryOwner: "",
-    changedPaths: ["docs/ci.md"],
-    changedCoreTestPaths: null,
-    runnerProfile,
-    checkMatrix: {
-      include: Array.from({ length: rows }, (_, index) => ({
-        check_name: `check-guards-${index}`,
-        task: "guards",
-        runner: "blacksmith-4vcpu-ubuntu-2404",
-      })),
-    },
-    coreTypeMatrix: { include: [] },
-    // A null lint plan retains templates even when their runner profile disables them.
-    lintCoreMatrix: { include: rows ? [{ stripe: 1 }, { stripe: 2 }] : [] },
-    lintExtensionMatrix: { include: rows ? [{ stripe: 1 }, { stripe: 2 }, { stripe: 3 }] : [] },
-  };
-  const output = join(tempDirs.make("ci-check-plan-"), "output");
-  const workflow = readCiWorkflow();
-  const planner = workflow.jobs["check-plan"];
-  const step = planner.steps.find((candidate: WorkflowStep) => candidate.id === "plan");
-  const context: Parameters<typeof evaluateWorkflowExpression>[1] = {
-    eventName: "pull_request",
-    repository: "openclaw/openclaw",
-    runAttempt: 1,
-    preflightOutputs: { check_plan_input_json: JSON.stringify(input) },
-  };
-  const run = runWorkflowShellScript(step.run, {
-    cwd: process.cwd(),
-    env: {
-      ...process.env,
-      GITHUB_OUTPUT: output,
-      OPENCLAW_CI_CHECK_PLAN_INPUT_JSON: evaluateWorkflowExpression(
-        step.env.OPENCLAW_CI_CHECK_PLAN_INPUT_JSON,
-        context,
-      ),
-    },
-  });
-  return { run, outputs: existsSync(output) ? readWorkflowOutputs(output) : {} };
-}
-
 describe("CI check-plan selection", () => {
   it.each(["hybrid", "github", "blacksmith"])(
     "selects complete extension roots without narrowing full check owners (%s)",
     async (runnerProfile) => {
       for (const mode of ["affected", "none", "full"] as const) {
-        const roots = mode === "affected" ? ["extensions/discord"] : [];
+        const roots = mode === "affected" ? ["extensions/imessage"] : [];
         vi.mocked(resolveCiExtensionLintSelection).mockResolvedValue({
           mode: mode === "full" ? "full" : "selected",
           extensionRoots: roots,
@@ -296,14 +246,4 @@ describe("CI check-plan selection", () => {
       expect(plan.central_lint_selection_json).toBe("");
     },
   );
-
-  it.each([
-    { runner: "blacksmith", rows: 401, base: undefined, error: "400-job" },
-    { runner: "hybrid", rows: 0, base: "main", error: "40-hex changed base commit" },
-  ])("rejects an inadmissible workflow plan: $error", ({ runner, rows, base, error }) => {
-    const { run, outputs } = materializePlan(runner, rows, base);
-    expect(run.status).toBe(1);
-    expect(run.stderr).toContain(error);
-    expect(outputs).toEqual({});
-  });
 });

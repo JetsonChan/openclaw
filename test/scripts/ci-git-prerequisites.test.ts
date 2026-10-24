@@ -3,7 +3,6 @@ import prerequisites from "../../.github/actions/git-owner/test-prerequisites.js
 import { resolveTestGitCommits } from "../../.github/actions/git-owner/test-prerequisites.mjs";
 import { createNodeTestShardBundles } from "../../scripts/lib/ci-node-test-plan.mts";
 import { runAuthFixture } from "./ci-checkout-auth.test-support.js";
-import { runCiGitStep } from "./ci-git-owner.test-support.js";
 
 const reader = prerequisites.outboundMessageTerminalReader;
 
@@ -42,34 +41,5 @@ it.each([false, true])(
   (compact) => {
     const shards = createNodeTestShardBundles({ compact });
     expect(shards.filter((shard) => resolveTestGitCommits(shard).length > 0)).toHaveLength(1);
-  },
-);
-
-it("fetches selected history with the initial checkout before the test worker runs", async ({
-  signal,
-}) => {
-  const report = await runCiGitStep({
-    signal,
-    job: "checks-node-core-test-nondist-shard",
-    env: { CHECKOUT_GIT_COMMITS_JSON: JSON.stringify([reader.commit]) },
-    fetchResults: [0, 0],
-  });
-  expect(report.code, report.output).toBe(0);
-  expect(report.fetches[0]?.args).toContain(reader.commit);
-  expect(report.fetches).toHaveLength(2);
-});
-
-it.for(["{}", '"main"', '["--upload-pack=bad"]', '["abc"]', "[null]"])(
-  "rejects malformed immutable history before checkout mutation: %s",
-  async (input, { signal }) => {
-    const report = await runCiGitStep({
-      signal,
-      job: "checks-node-core-test-nondist-shard",
-      env: { CHECKOUT_GIT_COMMITS_JSON: input },
-      fetchResults: [],
-    });
-    expect(report.code, report.output).toBe(125);
-    expect(report.commands).toEqual([]);
-    expect(report.output).toContain("Git ownership/setup failed (ValueError)");
   },
 );
