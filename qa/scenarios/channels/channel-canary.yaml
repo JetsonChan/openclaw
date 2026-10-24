@@ -23,10 +23,7 @@ scenario:
     kind: flow
     channels:
       - qa-channel
-      - telegram
-      - buzz
-      - msteams
-    summary: Run the shared channel canary through QA Channel, Crabline, or a live adapter.
+    summary: Run the shared channel canary through QA Channel.
     transportPolicy:
       requireGroupMention: true
     config:

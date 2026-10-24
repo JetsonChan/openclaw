@@ -18,7 +18,6 @@
     "**/*test-support.ts",
     "extensions/**/test/**",
     "extensions/**/src/test-support/**",
-    "extensions/qa-lab/**",
     "test/**"
   ]
 }

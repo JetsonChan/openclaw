@@ -1,6 +1,4 @@
 import { describe, expect, it } from "vitest";
-import { buildMatrixToolProgressMentionSafetyPrompt } from "../../live-transports/matrix/scenarios/scenario-runtime-prompts.js";
-import { runLoadedScenarioFlow } from "../../scenario-flow-runner.test-support.js";
 import {
   createMockServerTestHarness,
   expectNonStreamingResponsesJson,
@@ -123,39 +121,6 @@ async function requestProgress(
 }
 
 describe("Anthropic command progress wire", () => {
-  it.each([{ exitCode: 0, expected: "BUG-TOOL-DID-NOT-FAIL" }])(
-    "honors the Matrix required failure after exit $exitCode",
-    async ({ exitCode, expected }) => {
-      const prompt = buildMatrixToolProgressMentionSafetyPrompt(
-        "@qa-sut:matrix-qa.test",
-        "PROGRESS_OK",
-      );
-      const plan = await requestProgress("messages", prompt, []);
-      const call = plan.content[0];
-      expect(call.name).toBe("exec");
-      const args = call.input;
-      expect(args.command).toBe(
-        "while [ ! -d 'matrix-progress-@room-@alice:matrix-qa.test-!room:matrix-qa.test.release' ]; do sleep 1; done; rmdir 'matrix-progress-@room-@alice:matrix-qa.test-!room:matrix-qa.test.release'; false",
-      );
-      const results: ProgressResult[] = [
-        {
-          tool: "exec",
-          args,
-          output: exitCode === 1 ? RUNNING_OUTPUT : [{ type: "text", text: RUNNING_OUTPUT }],
-        },
-      ];
-      const pending = await requestProgress("messages", prompt, results);
-      expect(pending.content).toMatchObject([{ name: "process" }]);
-      results.push({
-        tool: "process",
-        args: { action: "poll", sessionId: "lucky-slug" },
-        output: `\n\nProcess exited with code ${exitCode}.`,
-      });
-      expect(await requestProgress("messages", prompt, results)).toMatchObject({
-        content: [{ text: expected }],
-      });
-    },
-  );
   it.each([{ label: "empty", callId: "" }])(
     "rejects $label call IDs even when command failure is allowed",
     async ({ callId }) => {
@@ -303,65 +268,6 @@ it("keeps Slack commentary progress open while its exec is running", async () =>
       },
     ],
   });
-});
-
-it("selects commentary, exec, and final delivery for the actual Telegram scenario prompt", async () => {
-  const server = await startMockServer();
-  const captured = new Error("captured the scenario's provider input");
-  let prompt = "";
-  await expect(
-    runLoadedScenarioFlow("telegram-progress-tool-visibility", {
-      api: {
-        env: {
-          providerMode: "mock-openai",
-          mock: server,
-          gateway: { restartAfterStateMutation: async () => undefined },
-        },
-        fetchJson: async (url: string) => (await fetch(url)).json(),
-        transport: {
-          id: "telegram",
-          accountId: "sut",
-          reset: async () => undefined,
-          sendInbound: async (input: { text: string }) => {
-            prompt = input.text;
-            throw captured;
-          },
-        },
-      },
-    }),
-  ).rejects.toBe(captured);
-  const request = (input: unknown[]) =>
-    expectNonStreamingResponsesJson(server, {
-      model: "qa-model",
-      tools: [{ type: "function", name: "exec" }],
-      input,
-    });
-  const input = [makeUserInput(prompt)];
-  const plan = await request(input);
-  expect(outputItems(plan)).toMatchObject([
-    {
-      type: "message",
-      phase: "commentary",
-      content: [{ text: "SLACK-QA-COMMENTARY-00000000" }],
-    },
-    { type: "function_call", name: "exec" },
-  ]);
-  const call = outputToolCall(plan, "exec");
-  const final = await request([
-    ...input,
-    call,
-    makeToolOutputWithCallId(
-      String(call.call_id),
-      "SLACK-QA-OUTPUT-00000000\n\nProcess exited with code 0.",
-    ),
-  ]);
-  expect(outputItems(final)).toMatchObject([
-    {
-      type: "message",
-      phase: "final_answer",
-      content: [{ text: "SLACK-QA-COMMENTARY-DONE-00000000" }],
-    },
-  ]);
 });
 
 async function completeProgress(params: {

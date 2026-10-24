@@ -174,22 +174,6 @@ describe("qa suite planning helpers", () => {
     ).toEqual(["telegram", "matrix", "slack"]);
   });
 
-  it("isolates Matrix reaction flows that require a fresh native canary", () => {
-    const scenarioIds = [
-      "matrix-reaction-notification",
-      "matrix-reaction-threaded",
-      "matrix-reaction-not-a-reply",
-      "matrix-reaction-redaction-observed",
-    ];
-
-    for (const scenarioId of scenarioIds) {
-      const scenario = requireFlowScenario(readQaScenarioById(scenarioId));
-      expect(scenario.execution.suiteIsolation, scenarioId).toBe("isolated");
-      expect(scenario.execution.isolationReason, scenarioId).toContain("fresh canary reply");
-      expect(scenarioRequiresIsolatedQaSuiteWorker(scenario), scenarioId).toBe(true);
-    }
-  });
-
   it("isolates and collects scenario-declared transport policy", () => {
     const scenario = makeQaSuiteTestScenario("sender-policy", {
       transportPolicy: {
@@ -254,18 +238,24 @@ describe("qa suite planning helpers", () => {
   });
 
   it("targets the selected adapter account in scenario startup config patches", () => {
-    const scenarios = [readQaScenarioById("whatsapp-access-control-dm-open")];
+    const scenarios = [
+      makeQaSuiteTestScenario("adapter-account-patch", {
+        gatewayConfigPatch: {
+          channels: { imessage: { accounts: { $selectedAccount: { dmPolicy: "open" } } } },
+        },
+      }),
+    ];
 
     expect(
       applyQaSuiteGatewayConfigPatches(
         {},
-        collectQaSuiteGatewayConfigPatches(scenarios, "whatsapp-alt"),
+        collectQaSuiteGatewayConfigPatches(scenarios, "imessage-alt"),
       ),
     ).toEqual({
       channels: {
-        whatsapp: {
+        imessage: {
           accounts: {
-            "whatsapp-alt": {
+            "imessage-alt": {
               dmPolicy: "open",
             },
           },

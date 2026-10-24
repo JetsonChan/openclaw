@@ -9,31 +9,23 @@ scenario:
     secondary:
       - agent-runtime.streaming-replies-delivery
   objective: Verify streaming channel replies produce visible previews that resolve to one final answer.
-  gatewayConfigPatch:
-    channels:
-      telegram:
-        streaming:
-          mode: partial
   successCriteria:
     - The selected transport exposes at least one preview event before final delivery.
     - The final answer replaces or follows the preview without losing the requested text.
   docsRefs:
     - docs/channels/qa-channel.md
-    - docs/channels/telegram.md
     - docs/concepts/qa-e2e-automation.md
   codeRefs:
     - extensions/qa-channel/src/inbound.ts
     - extensions/qa-lab/src/crabline-transport.ts
     - extensions/qa-lab/src/providers/mock-openai/server.ts
     - extensions/qa-lab/src/qa-transport.ts
-    - extensions/telegram/src/draft-stream.ts
   execution:
     kind: flow
     retryCount: 0
     channels:
       - qa-channel
-      - telegram
-    summary: Stream a deterministic answer through QA Channel or Crabline Telegram and assert its preview lifecycle.
+    summary: Stream a deterministic answer through QA Channel and assert its preview lifecycle.
     config:
       requiredProviderMode: mock-openai
       conversationId: "-1001234567890"

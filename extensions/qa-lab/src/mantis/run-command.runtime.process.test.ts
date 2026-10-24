@@ -1,12 +1,10 @@
 import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
-import { setTimeout as sleep } from "node:timers/promises";
 import { afterEach, expect, it } from "vitest";
 import { removeMantisWorktree } from "./run-cleanup.runtime.js";
-import { defaultMantisCommandRunner, MantisCommandCleanupError } from "./run-command.runtime.js";
+import { defaultMantisCommandRunner } from "./run-command.runtime.js";
 import { captureMantisDirectoryOwnership } from "./run-directory.runtime.js";
-import { runMantisBeforeAfter } from "./run.runtime.js";
 import { successfulCommandResult } from "./run.test-support.js";
 
 const roots: string[] = [];
@@ -85,47 +83,6 @@ it.skipIf(process.platform === "win32")(
   10000,
 );
 
-it.each(["returned", "thrown", "typed"])(
-  "retains the worktree when command cleanup is %s as uncertain",
-  async (mode) => {
-    const repoRoot = await fs.realpath(
-      await fs.mkdtemp(path.join(os.tmpdir(), "mantis-uncertain-owner-")),
-    );
-    roots.push(repoRoot);
-    const removals: string[] = [];
-    const result = successfulCommandResult();
-    const run = runMantisBeforeAfter({
-      repoRoot,
-      outputDir: ".artifacts/uncertain",
-      skipBuild: true,
-      skipInstall: true,
-      commandRunner: async (_command, args, execution) => {
-        if (execution.stage === "qa") {
-          if (mode === "typed") {
-            throw new MantisCommandCleanupError("unsupported ownership", undefined);
-          }
-          if (mode === "thrown") {
-            throw Object.assign(new Error("command output failed"), { cleanup: "uncertain" });
-          }
-          return { ...result, cleanup: "uncertain" as const };
-        }
-        if (args[1] === "remove") {
-          removals.push(execution.cwd);
-          await fs.rm(execution.cwd, { recursive: true, force: true });
-        }
-        return result;
-      },
-    });
-    await expect(run).rejects.toBeInstanceOf(Error);
-    expect(removals).toEqual([]);
-    const retained = await fs.readdir(path.join(repoRoot, ".artifacts/uncertain.worktrees"));
-    expect(retained).toEqual([expect.stringMatching(/^baseline-/u)]);
-    await expect(
-      fs.readFile(path.join(repoRoot, ".artifacts/uncertain/error.txt"), "utf8"),
-    ).resolves.toContain("Mantis preserved");
-  },
-);
-
 it("retains uncertain Git removal without starting another verification command", async () => {
   const repoRoot = await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(), "mantis-git-owner-")));
   roots.push(repoRoot);
@@ -157,50 +114,3 @@ it("retains uncertain Git removal without starting another verification command"
   expect(commands).toEqual(["remove"]);
   await expect(fs.stat(worktreeDir)).resolves.toBeDefined();
 });
-
-it.each([false, true])(
-  "charges interrupt settlement against cleanup budget (exhausted: %s)",
-  async (exhausted) => {
-    const repoRoot = await fs.realpath(
-      await fs.mkdtemp(path.join(os.tmpdir(), "mantis-interrupt-budget-")),
-    );
-    roots.push(repoRoot);
-    const controller = new AbortController();
-    const cleanupTimeouts: number[] = [];
-    const run = runMantisBeforeAfter({
-      repoRoot,
-      outputDir: ".artifacts/budget",
-      skipBuild: true,
-      skipInstall: true,
-      signal: controller.signal,
-      commandTimeouts: { "worktree-cleanup": 200 },
-      commandRunner: async (_command, args, execution) => {
-        if (execution.stage === "qa") {
-          controller.abort(new Error("interrupted fixture"));
-          await sleep(exhausted ? 240 : 80);
-          throw controller.signal.reason;
-        }
-        if (args[1] === "remove") {
-          cleanupTimeouts.push(execution.timeoutMs);
-          await fs.rm(execution.cwd, { recursive: true, force: true });
-        }
-        return successfulCommandResult();
-      },
-    });
-    await expect(run).rejects.toBeInstanceOf(Error);
-    if (exhausted) {
-      expect(cleanupTimeouts).toEqual([]);
-      expect(await fs.readdir(path.join(repoRoot, ".artifacts/budget.worktrees"))).toEqual([
-        expect.stringMatching(/^baseline-/u),
-      ]);
-      await expect(
-        fs.readFile(path.join(repoRoot, ".artifacts/budget/error.txt"), "utf8"),
-      ).resolves.toContain("interrupt cleanup budget exhausted");
-    } else {
-      expect(cleanupTimeouts).toHaveLength(1);
-      expect(cleanupTimeouts[0]).toBeGreaterThan(0);
-      expect(cleanupTimeouts[0]).toBeLessThan(150);
-      expect(await fs.readdir(path.join(repoRoot, ".artifacts/budget.worktrees"))).toEqual([]);
-    }
-  },
-);

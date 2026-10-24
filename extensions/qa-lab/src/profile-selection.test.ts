@@ -1,5 +1,4 @@
 import { describe, expect, it } from "vitest";
-import { resolveLiveTransportQaScenarioIds } from "./live-transports/shared/scenario-selection.js";
 import {
   resolveQaProfileScenarios,
   resolveQaRunProfileExecutionSelection,
@@ -75,29 +74,40 @@ describe("taxonomy profile scenario selection", () => {
   });
 
   it("derives channel defaults from catalog metadata and lane constraints", () => {
-    const liveTelegram = resolveLiveTransportQaScenarioIds({
-      channelId: "telegram",
+    const live = resolveQaProfileScenarios({
+      profile: "all",
+      channelDriver: "qa-channel",
+      channel: "qa-channel",
       providerMode: "live-frontier",
-    });
-    const mockTelegram = resolveLiveTransportQaScenarioIds({
-      channelId: "telegram",
+    }).scenarios.map(({ id }) => id);
+    const mock = resolveQaProfileScenarios({
+      profile: "all",
+      channelDriver: "qa-channel",
+      channel: "qa-channel",
       providerMode: "mock-openai",
-    });
+    }).scenarios.map(({ id }) => id);
 
-    expect(liveTelegram).toContain("telegram-help-command");
-    expect(liveTelegram).not.toContain("telegram-assistant-transcript-role-boundary");
-    expect(mockTelegram).not.toContain("telegram-assistant-transcript-role-boundary");
-    expect(mockTelegram).not.toContain("discord-canary");
+    expect(live).toContain("channel-canary");
+    expect(mock).toContain("channel-canary");
+    expect(live).not.toContain("telegram-assistant-transcript-role-boundary");
+    expect(mock).not.toContain("discord-canary");
   });
 
   it("lets flow-only consumers exclude a channel-declared script without changing membership", () => {
-    const scenario = readQaScenarioById("telegram-startup-getme-live");
+    const scenario = {
+      ...readQaScenarioById("gateway-smoke"),
+      execution: {
+        ...readQaScenarioById("gateway-smoke").execution,
+        channel: "qa-channel",
+        channels: ["qa-channel"],
+      },
+    };
     const lane = {
       scenarios: [scenario],
       providerMode: "mock-openai" as const,
       primaryModel: "mock-openai/gpt-5.6-luna",
-      channelDriver: "live" as const,
-      channel: "telegram",
+      channelDriver: "qa-channel" as const,
+      channel: "qa-channel",
     };
 
     expect(resolveQaRunProfileExecutionSelection(lane).selectedScenarios).toEqual([scenario]);

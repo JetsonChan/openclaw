@@ -385,52 +385,9 @@ function createQaCrablineTransport(params: {
     | "waitForOutboundSequence"
     | "waitForCompletedReply"
   > = {};
-  let releaseDiscordQaApiBase: (() => void) | undefined;
   if (params.state.slackIngress) {
     hooks.prepareFlow = params.state.slackIngress.prepareFlow;
     hooks.cleanup = params.state.slackIngress.cleanup;
-  }
-  if (state.discordReplies && params.adapter.manifest.provider === "discord") {
-    const { apiBaseUrl, waitForCompletedReply } = state.discordReplies;
-    hooks.waitForCompletedReply = waitForCompletedReply;
-    const manifest = params.adapter.manifest;
-    let prepared:
-      | Promise<
-          ReturnType<
-            typeof import("./live-transports/discord/scenario-environment.js").createDiscordQaScenarioEnvironment
-          >
-        >
-      | undefined;
-    const prepareEnvironment = () => {
-      prepared ??= (async () => {
-        const scenarioRuntime = await import("./live-transports/discord/discord-live.runtime.js");
-        releaseDiscordQaApiBase = scenarioRuntime.registerDiscordQaApiBase({
-          apiBaseUrl,
-          tokens: [manifest.botToken, manifest.driverBotToken],
-        });
-        const [sutIdentity, driverIdentity] = await Promise.all([
-          scenarioRuntime.getCurrentDiscordUser(manifest.botToken),
-          scenarioRuntime.getCurrentDiscordUser(manifest.driverBotToken),
-        ]);
-        const { createDiscordQaScenarioEnvironment } =
-          await import("./live-transports/discord/scenario-environment.js");
-        return createDiscordQaScenarioEnvironment({
-          accountId: params.adapter.accountId,
-          driverIdentity,
-          runtimeEnv: {
-            channelId: manifest.fixture.channelId,
-            driverBotToken: manifest.driverBotToken,
-            guildId: manifest.fixture.guildId,
-            sutApplicationId: manifest.applicationId,
-            sutBotToken: manifest.botToken,
-            voiceChannelId: manifest.fixture.voiceChannelId,
-          },
-          sutIdentity,
-        });
-      })();
-      return prepared;
-    };
-    hooks.prepareFlow = async (input) => (await prepareEnvironment()).prepareFlow(input);
   }
   if (params.selection.channel === "telegram") {
     hooks.sendNativeCommand = (input) => sendQaTransportNativeCommand(stateMethods, input);
@@ -626,7 +583,6 @@ function createQaCrablineTransport(params: {
     },
 
     async cleanupAfterGatewayStop() {
-      releaseDiscordQaApiBase?.();
       await state.cleanup();
     },
   } satisfies QaTransportAdapter & { resetTransport: () => void };

@@ -7,8 +7,6 @@ export function createQaCrablineTransportAdapterFactory(
   return {
     id: "crabline",
     matches: ({ driver }) => driver === "crabline",
-    supportsModuleFlowsFor: ({ channelId, driver }) =>
-      driver === "crabline" && channelId === "discord",
     async create(context) {
       if (!state) {
         throw new Error("Crabline QA transport factory requires an owning bus state");

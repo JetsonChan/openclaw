@@ -12,11 +12,7 @@ import {
   type QaSeedScenarioWithSource,
 } from "./scenario-catalog.js";
 import { runScenarioFlow } from "./scenario-flow-runner.js";
-import {
-  runLoadedScenarioFlow,
-  assertTelegramRichObservationFlow,
-  telegramRichObservationCases,
-} from "./scenario-flow-runner.test-support.js";
+import { runLoadedScenarioFlow } from "./scenario-flow-runner.test-support.js";
 import { makeQaSuiteTestScenario } from "./suite-test-helpers.js";
 
 type FlowApi = Parameters<typeof runScenarioFlow>[0]["api"];
@@ -268,15 +264,6 @@ const planningEvidenceFixtures = readQaScenarioPack()
   .map(createPlanningEvidenceFixture);
 
 describe("scenario-flow-runner", () => {
-  it.each(
-    telegramRichObservationCases.filter(
-      (testCase) => testCase === "message" || testCase === "wrong-edit-marker",
-    ),
-  )(
-    "correlates Telegram rich observations without crossing account IDs: %s",
-    assertTelegramRichObservationFlow,
-  );
-
   it("keeps live goal followthrough inside the active-goal context limit", async () => {
     const state = createQaBusState();
     const artifactFile = "goal-continuance-live-00000000.txt";

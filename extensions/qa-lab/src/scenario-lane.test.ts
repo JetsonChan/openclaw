@@ -20,11 +20,10 @@ describe("QA scenario lane matching", () => {
   );
 
   it("expands scheduler cells deterministically across flow and native scenarios", () => {
+    const threaded = requireFlowScenario(makeQaSuiteTestScenario("thread-isolation"));
+    threaded.execution.channels = ["slack", "matrix"];
     const cells = expandQaScenarioExecutionCells({
-      scenarios: [
-        readQaScenarioById("thread-isolation"),
-        readQaScenarioById("control-ui-chat-flow-playwright"),
-      ],
+      scenarios: [threaded, readQaScenarioById("control-ui-chat-flow-playwright")],
       channelDriver: "live",
       supportsChannel: (channel) => channel === "matrix" || channel === "slack",
       expandChannels: true,
@@ -100,7 +99,7 @@ describe("QA scenario lane matching", () => {
     },
   );
 
-  it.each(["matrix-room-block-streaming", "matrix-voice-preflight-mention"])(
+  it.each(["subagent-completion-direct-fallback"])(
     "keeps the scenario-pinned provider for %s out of the live provider lane",
     (scenarioId) => {
       const scenario = readQaScenarioById(scenarioId);
@@ -109,7 +108,7 @@ describe("QA scenario lane matching", () => {
         providerMode: "live-frontier" as const,
         primaryModel: "openai/gpt-5.6-luna",
         channelDriver: "live" as const,
-        channel: "matrix",
+        channel: "qa-channel",
         supportsModuleFlows: true,
       };
 
@@ -118,8 +117,8 @@ describe("QA scenario lane matching", () => {
     },
   );
 
-  it("excludes a mock-pinned Matrix scenario from a live profile execution", () => {
-    const scenario = readQaScenarioById("matrix-room-block-streaming");
+  it("excludes a mock-pinned scenario from a live profile execution", () => {
+    const scenario = readQaScenarioById("subagent-completion-direct-fallback");
 
     expect(
       resolveQaRunProfileExecutionSelection({
@@ -127,7 +126,7 @@ describe("QA scenario lane matching", () => {
         providerMode: "live-frontier",
         primaryModel: "openai/gpt-5.6-luna",
         channelDriver: "live",
-        channel: "matrix",
+        channel: "qa-channel",
         resolveModuleFlowSupport: () => true,
       }),
     ).toEqual({
@@ -245,7 +244,7 @@ describe("QA scenario lane matching", () => {
 
   it("enforces an explicit channel driver contract", () => {
     const scenario = makeQaSuiteTestScenario("live-only", {
-      channel: "matrix",
+      channel: "qa-channel",
       config: { requiredChannelDriver: "live" },
     });
 
@@ -255,7 +254,7 @@ describe("QA scenario lane matching", () => {
         providerMode: "mock-openai",
         primaryModel: "mock-openai/gpt-5.6-luna",
         channelDriver: "crabline",
-        channel: "matrix",
+        channel: "qa-channel",
       }),
     ).toEqual(["channelDriver=live"]);
     expect(
@@ -264,7 +263,7 @@ describe("QA scenario lane matching", () => {
         providerMode: "mock-openai",
         primaryModel: "mock-openai/gpt-5.6-luna",
         channelDriver: "live",
-        channel: "matrix",
+        channel: "qa-channel",
       }),
     ).toBe(true);
   });
@@ -319,7 +318,7 @@ describe("QA scenario lane matching", () => {
 
   it.each([
     { channelDriver: "qa-channel" as const, channel: undefined, matches: true },
-    { channelDriver: "crabline" as const, channel: "telegram", matches: true },
+    { channelDriver: "crabline" as const, channel: "telegram", matches: false },
     { channelDriver: "crabline" as const, channel: "discord", matches: false },
   ])(
     "matches channel streaming evidence for $channelDriver channel $channel: $matches",

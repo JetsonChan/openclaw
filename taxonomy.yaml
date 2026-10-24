@@ -18,13 +18,11 @@ profiles:
       - agent-runtime.tool-fs-write
       - agent-runtime.tool-task-followthrough
       - channels.outbound-group-reply
-      - channels.resumed-final-reply
       - gateway.health-apis
       - gateway.hello-ok-snapshot
       - gateway.websocket-transport
       - plugins.activation-lifecycle
       - session-memory.memory-files-dreaming
-      - telegram.built-in-commands
   - id: personal-agent
     description: Local personal-assistant reliability proof selected by semantic coverage targets.
     coverageIds:

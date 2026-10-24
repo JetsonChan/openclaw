@@ -1,20 +1,6 @@
 import type { Command } from "commander";
-import { runWithMantisCliInterrupts } from "./cli-interrupts.js";
 import type { MantisDesktopBrowserSmokeOptions } from "./desktop-browser-smoke.runtime.js";
-import type { MantisDiscordSmokeOptions } from "./discord-smoke.runtime.js";
-import type { MantisBeforeAfterOptions } from "./run.runtime.js";
-import type { MantisSlackDesktopSmokeOptions } from "./slack-desktop-smoke.runtime.js";
 import type { MantisVisualDriverOptions, MantisVisualTaskOptions } from "./visual-task.runtime.js";
-
-type MantisDiscordSmokeCommanderOptions = Omit<
-  MantisDiscordSmokeOptions,
-  "env" | "now" | "redactPublicMetadata" | "token"
->;
-
-type MantisBeforeAfterCommanderOptions = Omit<
-  MantisBeforeAfterOptions,
-  "commandRunner" | "fastMode" | "now"
-> & { fast?: boolean };
 
 type MantisDesktopBrowserSmokeCommanderOptions = Omit<
   MantisDesktopBrowserSmokeOptions,
@@ -22,17 +8,6 @@ type MantisDesktopBrowserSmokeCommanderOptions = Omit<
 > & {
   class?: string;
   videoDuration?: string;
-};
-
-type MantisSlackDesktopSmokeCommanderOptions = Omit<
-  MantisSlackDesktopSmokeOptions,
-  "alternateModel" | "commandRunner" | "env" | "fastMode" | "now" | "primaryModel" | "scenarioIds"
-> & {
-  altModel?: string;
-  class?: string;
-  fast?: boolean;
-  model?: string;
-  scenario?: string[];
 };
 
 type MantisVisualTaskCommanderOptions = Omit<
@@ -52,10 +27,6 @@ type MantisVisualDriverCommanderOptions = Omit<
   visionTimeoutMs?: string;
 };
 
-function collectString(value: string, previous: string[] = []) {
-  return [...previous, value];
-}
-
 function parseOptionalInteger(value: string | undefined, label: string) {
   if (value === undefined) {
     return undefined;
@@ -70,47 +41,7 @@ function parseOptionalInteger(value: string | undefined, label: string) {
 export function registerMantisCli(qa: Command) {
   const mantis = qa
     .command("mantis")
-    .description("Run Mantis before/after and live-smoke verification flows");
-
-  mantis
-    .command("run")
-    .description("Run a Mantis before/after scenario against baseline and candidate refs")
-    .requiredOption("--transport <transport>", "Transport to verify; currently only discord")
-    .requiredOption("--scenario <id>", "Mantis scenario id to run")
-    .requiredOption("--baseline <ref>", "Ref expected to reproduce the bug")
-    .requiredOption("--candidate <ref>", "Ref expected to contain the fix")
-    .option("--repo-root <path>", "Repository root to target when running from a neutral cwd")
-    .option("--output-dir <path>", "Mantis before/after artifact directory")
-    .option("--provider-mode <mode>", "QA provider mode", "live-frontier")
-    .option("--credential-source <source>", "QA credential source", "convex")
-    .option("--credential-role <role>", "QA credential role", "ci")
-    .option("--fast", "Enable fast provider mode where supported", true)
-    .option("--skip-install", "Skip pnpm install in baseline/candidate worktrees", false)
-    .option("--skip-build", "Skip pnpm build in baseline/candidate worktrees", false)
-    .action(async (opts: MantisBeforeAfterCommanderOptions) => {
-      const { fast, ...options } = opts;
-      await runWithMantisCliInterrupts(async (signal) => {
-        const runtime = await import("./cli.runtime.js");
-        await runtime.runMantisBeforeAfterCommand({ ...options, fastMode: fast, signal });
-      });
-    });
-
-  mantis
-    .command("discord-smoke")
-    .description("Verify the Mantis Discord bot can see the guild/channel, post, and react")
-    .option("--repo-root <path>", "Repository root to target when running from a neutral cwd")
-    .option("--output-dir <path>", "Mantis Discord smoke artifact directory")
-    .option("--guild-id <id>", "Override OPENCLAW_QA_DISCORD_GUILD_ID")
-    .option("--channel-id <id>", "Override OPENCLAW_QA_DISCORD_CHANNEL_ID")
-    .option("--token-env <name>", "Env var containing the Mantis Discord bot token")
-    .option("--token-file <path>", "File containing the Mantis Discord bot token")
-    .option("--token-file-env <name>", "Env var containing the Mantis Discord bot token file path")
-    .option("--message <text>", "Smoke message to post")
-    .option("--skip-post", "Only check Discord API visibility; do not post or react", false)
-    .action(async (opts: MantisDiscordSmokeCommanderOptions) => {
-      const runtime = await import("./cli.runtime.js");
-      await runtime.runMantisDiscordSmokeCommand(opts);
-    });
+    .description("Run Mantis browser and visual verification flows");
 
   mantis
     .command("desktop-browser-smoke")
@@ -146,61 +77,6 @@ export function registerMantisCli(qa: Command) {
         ...options,
         machineClass: options.machineClass ?? machineClassAlias,
         videoDurationSeconds,
-      });
-    });
-
-  mantis
-    .command("slack-desktop-smoke")
-    .description(
-      "Lease or reuse a Crabbox VNC desktop, run Slack QA inside it, open Slack in the browser, and capture screenshot/video artifacts",
-    )
-    .option("--repo-root <path>", "Repository root to target when running from a neutral cwd")
-    .option("--output-dir <path>", "Mantis Slack desktop artifact directory")
-    .option("--crabbox-bin <path>", "Crabbox binary path")
-    .option("--provider <provider>", "Crabbox provider")
-    .option("--machine-class <class>", "Crabbox machine class")
-    .option("--class <class>", "Alias for --machine-class")
-    .option("--market <market>", "Crabbox capacity market: spot or on-demand")
-    .option("--lease-id <id>", "Reuse an existing Crabbox lease")
-    .option("--fresh-pr <spec>", "Use Crabbox fresh PR checkout instead of syncing the local tree")
-    .option("--idle-timeout <duration>", "Crabbox idle timeout")
-    .option("--ttl <duration>", "Crabbox maximum lease lifetime")
-    .option("--keep-lease", "Keep a lease created by this run after a passing smoke")
-    .option("--no-keep-lease", "Stop a lease created by this run after a passing smoke")
-    .option("--gateway-setup", "Start a persistent OpenClaw Slack gateway inside the VNC VM")
-    .option(
-      "--approval-checkpoints",
-      "Run Slack approval scenarios with visual checkpoint screenshot acknowledgements",
-    )
-    .option("--slack-url <url>", "Slack web URL to open in the visible browser")
-    .option("--slack-channel-id <id>", "Slack channel id for gateway setup allowlist")
-    .option("--provider-mode <mode>", "QA provider mode")
-    .option("--hydrate-mode <mode>", "Remote hydrate mode: source or prehydrated")
-    .option("--model <ref>", "Primary provider/model ref")
-    .option("--alt-model <ref>", "Alternate provider/model ref")
-    .option(
-      "--scenario <id>",
-      "Run only the named Slack QA scenario (repeatable)",
-      collectString,
-      [],
-    )
-    .option("--credential-source <source>", "Credential source for Slack QA: env or convex")
-    .option("--credential-role <role>", "Credential role for convex auth")
-    .option("--fast", "Enable provider fast mode where supported")
-    .action(async (opts: MantisSlackDesktopSmokeCommanderOptions) => {
-      if (opts.approvalCheckpoints && opts.gatewaySetup) {
-        throw new Error("--approval-checkpoints cannot be used with --gateway-setup.");
-      }
-      const { altModel, class: machineClassAlias, fast, model, scenario, ...options } = opts;
-      const runtime = await import("./cli.runtime.js");
-      await runtime.runMantisSlackDesktopSmokeCommand({
-        ...options,
-        alternateModel: altModel,
-        fastMode: fast,
-        gatewaySetup: opts.gatewaySetup,
-        machineClass: options.machineClass ?? machineClassAlias,
-        primaryModel: model,
-        scenarioIds: scenario,
       });
     });
 

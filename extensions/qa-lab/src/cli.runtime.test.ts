@@ -41,16 +41,9 @@ const {
   readQaScenarioPack: vi.fn<() => QaScenarioPack>(),
 }));
 
-const {
-  listQaRunnerCliContributions,
-  runMantisBeforeAfterCommand,
-  runMantisDesktopBrowserSmokeCommand,
-  runMantisSlackDesktopSmokeCommand,
-} = vi.hoisted(() => ({
+const { listQaRunnerCliContributions, runMantisDesktopBrowserSmokeCommand } = vi.hoisted(() => ({
   listQaRunnerCliContributions: vi.fn<() => QaRunnerCliContribution[]>(),
-  runMantisBeforeAfterCommand: vi.fn(),
   runMantisDesktopBrowserSmokeCommand: vi.fn(),
-  runMantisSlackDesktopSmokeCommand: vi.fn(),
 }));
 vi.mock("openclaw/plugin-sdk/qa-runner-runtime", async (importOriginal) => ({
   ...(await importOriginal<typeof import("openclaw/plugin-sdk/qa-runner-runtime")>()),
@@ -58,9 +51,7 @@ vi.mock("openclaw/plugin-sdk/qa-runner-runtime", async (importOriginal) => ({
 }));
 
 vi.mock("./mantis/cli.runtime.js", () => ({
-  runMantisBeforeAfterCommand,
   runMantisDesktopBrowserSmokeCommand,
-  runMantisSlackDesktopSmokeCommand,
 }));
 
 vi.mock("./manual-lane.runtime.js", () => ({
@@ -84,10 +75,6 @@ vi.mock("./multipass.runtime.js", () => ({
 vi.mock("./live-transports/cli.js", async (importOriginal) => ({
   ...(await importOriginal<typeof import("./live-transports/cli.js")>()),
   listLiveTransportQaAdapterFactories,
-}));
-
-vi.mock("./live-transports/telegram/adapter.runtime.js", () => ({
-  createTelegramQaTransportAdapter: vi.fn(),
 }));
 
 vi.mock("./lab-server.js", () => ({
@@ -132,7 +119,6 @@ import {
 } from "./cli.runtime.js";
 import { QaSuiteInfraError } from "./errors.js";
 import type { QaEvidenceSummaryJson } from "./evidence-summary.js";
-import { runQaTelegramCommand } from "./live-transports/telegram/cli.runtime.js";
 import { defaultQaModelForMode as defaultQaProviderModelForMode } from "./model-selection.js";
 import { resolveQaLiveFrontierAlternateModel } from "./providers/live-frontier/model-selection.runtime.js";
 import type { QaTransportAdapterFactory } from "./qa-transport-registry.js";
@@ -298,7 +284,6 @@ describe("qa cli", () => {
   let suiteEvidencePath: string;
   let suiteReportPath: string;
   let suiteSummaryPath: string;
-  let telegramArtifactsDir: string;
   let priorExitCode: typeof process.exitCode;
 
   async function writeSuiteSummary(summary: unknown, summaryPath = suiteSummaryPath) {
@@ -338,38 +323,6 @@ describe("qa cli", () => {
     };
   }
 
-  async function prepareTelegramLauncher() {
-    const candidateRoot = path.join(telegramArtifactsDir, "candidate");
-    const boundaryDir = path.join(telegramArtifactsDir, "boundary");
-    const launcherPath = path.join(telegramArtifactsDir, "openclaw-telegram-sut-launcher");
-    const runtimeRoot = path.join(telegramArtifactsDir, "runtime");
-    const runtimeTempParent = path.join(runtimeRoot, "tmp");
-    const preloadPath = path.join(runtimeRoot, "openclaw-telegram-preentry.mjs");
-    const runtimeEntryPath = path.join(candidateRoot, "dist", "index.js");
-    await fs.mkdir(path.dirname(runtimeEntryPath), { recursive: true });
-    await fs.mkdir(boundaryDir);
-    await fs.mkdir(runtimeTempParent, { recursive: true });
-    await fs.writeFile(launcherPath, "#!/bin/sh\nexit 0\n", { mode: 0o700 });
-    await fs.writeFile(preloadPath, "export {};\n", { mode: 0o600 });
-    await fs.writeFile(runtimeEntryPath, "export {};\n", { mode: 0o600 });
-    vi.stubEnv("OPENCLAW_QA_TELEGRAM_SUT_FORWARDED_ENV_KEYS", "HOME,PATH");
-    vi.stubEnv("OPENCLAW_QA_TELEGRAM_SUT_CLEANUP_TIMEOUT_MS", "60000");
-    vi.stubEnv("OPENCLAW_QA_TELEGRAM_SUT_GID", "1002");
-    vi.stubEnv("OPENCLAW_QA_TELEGRAM_SUT_OPENCLAW_COMMAND", launcherPath);
-    vi.stubEnv("OPENCLAW_QA_TELEGRAM_SUT_PRELOAD_PATH", preloadPath);
-    vi.stubEnv("OPENCLAW_QA_TELEGRAM_SUT_PROCESS_BOUNDARY_DIR", boundaryDir);
-    vi.stubEnv("OPENCLAW_QA_TELEGRAM_SUT_RUNTIME_EXECUTABLE", process.execPath);
-    vi.stubEnv("OPENCLAW_QA_TELEGRAM_SUT_UID", "1001");
-    return {
-      candidateRoot,
-      boundaryDir,
-      launcherPath,
-      runtimeTempParent,
-      preloadPath,
-      runtimeEntryPath,
-    };
-  }
-
   beforeEach(async () => {
     listQaRunnerCliContributions.mockReturnValue([
       {
@@ -392,7 +345,6 @@ describe("qa cli", () => {
     suiteEvidencePath = path.join(suiteArtifactsDir, "qa-evidence.json");
     suiteReportPath = path.join(suiteArtifactsDir, "qa-suite-report.md");
     suiteSummaryPath = path.join(suiteArtifactsDir, "qa-suite-summary.json");
-    telegramArtifactsDir = await tempDirs.makeTempDir("qa-telegram-runtime-");
     await fs.writeFile(suiteReportPath, "# QA Suite Report\n", "utf8");
     await writeJson(
       suiteEvidencePath,
@@ -648,6 +600,7 @@ describe("qa cli", () => {
     "captures taxonomy before the filtered %s profile suite runs",
     async (evidenceMode) => {
       const report = taxonomyModule.readQaScorecardTaxonomyReport(readQaScenarioPack().scenarios);
+      report.profiles.find((entry) => entry.id === "smoke-ci")!.channelDriver = "qa-channel";
       const capturedIdentity = { ...report.taxonomy!.identity };
       vi.spyOn(taxonomyModule, "readQaScorecardTaxonomyReport").mockReturnValue(report);
       vi.stubEnv("OPENCLAW_QA_PROFILE", "release");
@@ -660,15 +613,15 @@ describe("qa cli", () => {
           suiteEvidencePath,
           makeQaEvidence([
             makeEvidenceEntry(
-              "telegram-commands-command",
-              "Telegram commands list reply",
-              "telegram.built-in-commands",
+              "subagent-completion-direct-fallback",
+              "Subagent completion terminal reply",
+              "agent-runtime.subagent-turns-delivery",
             ),
           ]),
         );
         return mockSuiteRuntimeResult("flow", {
           observedCells: expandQaScenarioExecutionCells({
-            scenarios: [readQaScenarioById("telegram-commands-command")],
+            scenarios: [readQaScenarioById("subagent-completion-direct-fallback")],
             channelDriver: params?.channelDriver ?? "qa-channel",
             channel: params?.channelId,
             defaultChannel: OPENCLAW_CRABLINE_DEFAULT_CHANNEL,
@@ -685,9 +638,9 @@ describe("qa cli", () => {
         "evidence-mode": evidenceMode === "full" ? "full" : "compact",
         "exclude-test-execution-evidence": evidenceMode === "slim",
         "fail-fast": true,
-        surface: "telegram",
-        category: "telegram.native-controls-and-approvals",
-        scenario: ["telegram-commands-command"],
+        surface: "agent-runtime",
+        category: "agent-runtime.external-runtimes-and-subagents",
+        scenario: ["subagent-completion-direct-fallback"],
         transport: "qa-channel",
         fast: true,
         concurrency: 2,
@@ -699,14 +652,14 @@ describe("qa cli", () => {
         repoRoot: path.resolve("/tmp/openclaw-repo"),
         outputDir: path.resolve("/tmp/openclaw-repo", ".artifacts/qa-e2e/smoke-ci"),
         transportId: "qa-channel",
-        channelDriver: "crabline",
+        channelDriver: "qa-channel",
         providerMode: "mock-openai",
         fastMode: true,
         concurrency: 2,
       });
       expect(suiteArgs.failFast).toBe(true);
-      expect(suiteArgs.channelId).toBe("telegram");
-      expect(suiteArgs.scenarioIds).toEqual(["telegram-commands-command"]);
+      expect(suiteArgs.channelId).toBeUndefined();
+      expect(suiteArgs.scenarioIds).toEqual(["subagent-completion-direct-fallback"]);
       expect(process.env.OPENCLAW_QA_PROFILE).toBe("release");
       const evidence = JSON.parse(
         await fs.readFile(suiteEvidencePath, "utf8"),
@@ -732,18 +685,23 @@ describe("qa cli", () => {
       expect(evidence.scorecard).not.toHaveProperty("taxonomy");
       expect(evidence.scorecard).not.toHaveProperty("profile");
       expect(evidence.scorecard?.categoryReports?.[0]).toMatchObject({
-        id: "telegram.native-controls-and-approvals",
+        id: "agent-runtime.external-runtimes-and-subagents",
       });
       expect(Object.hasOwn(evidence.entries?.[0] as object, "execution")).toBe(
         evidenceMode === "full",
       );
-      expect(JSON.stringify(evidence.scorecard)).not.toContain("telegram-commands-command");
+      expect(JSON.stringify(evidence.scorecard)).not.toContain(
+        "subagent-completion-direct-fallback",
+      );
       expectWriteContains(stdoutWrite, "QA run profile: smoke-ci; categories: 1; scenarios:");
       expectWriteContains(stdoutWrite, `QA profile scorecard: ${suiteEvidencePath}`);
     },
   );
 
   it("keeps portable channel scenarios in driver-selected profile runs", async () => {
+    const report = taxonomyModule.readQaScorecardTaxonomyReport(readQaScenarioPack().scenarios);
+    report.profiles.find((entry) => entry.id === "release")!.channelDriver = "qa-channel";
+    vi.spyOn(taxonomyModule, "readQaScorecardTaxonomyReport").mockReturnValue(report);
     await runQaProfileCommand({
       repoRoot: "/tmp/openclaw-repo",
       profile: "release",
@@ -826,7 +784,7 @@ describe("qa cli", () => {
 
     const suiteArgs = mockFirstObjectArg(runQaSuite);
     expect(suiteArgs.channelDriver).toBe("crabline");
-    expect(suiteArgs.scenarioIds).toContain("telegram-commands-command");
+    expect((suiteArgs.scenarioIds as string[]).length).toBeGreaterThan(0);
     const scenarioById = new Map(
       readQaScenarioPack().scenarios.map((scenario) => [scenario.id, scenario]),
     );
@@ -949,16 +907,17 @@ describe("qa cli", () => {
     },
   );
 
-  it("forwards resolved catalog scenarios for automatic mixed-channel host runs", async () => {
+  it("forwards selected retained catalog scenarios to the host", async () => {
     await runQaSuiteCommand({
       providerMode: "mock-openai",
-      channelDriver: "crabline",
+      channelDriver: "qa-channel",
+      scenarioIds: ["channel-chat-baseline", "thread-follow-up"],
     });
 
     const suiteArgs = mockFirstObjectArg(runQaSuite);
     expect(suiteArgs.channelId).toBeUndefined();
     expect(suiteArgs.scenarioIds).toEqual(
-      expect.arrayContaining(["telegram-help-command", "matrix-restart-resume"]),
+      expect.arrayContaining(["channel-chat-baseline", "thread-follow-up"]),
     );
     const scenarioById = new Map(
       readQaScenarioPack().scenarios.map((scenario) => [scenario.id, scenario]),
@@ -987,14 +946,6 @@ describe("qa cli", () => {
       "--image, --cpus, --memory, and --disk require --runner multipass.",
     ],
     [
-      {
-        channelDriver: "crabline",
-        runner: "multipass",
-        scenarioIds: ["telegram-help-command", "matrix-restart-resume"],
-      },
-      "Selected QA scenarios require multiple channels (telegram, matrix)",
-    ],
-    [
       { runtimePair: "openclaw,codex", scenarioIds: ["hosted-image-generation-providers-live"] },
       "--runtime-pair requires execution.kind: flow scenarios; unsupported scenario(s): hosted-image-generation-providers-live (script)",
     ],
@@ -1013,144 +964,12 @@ describe("qa cli", () => {
     },
   );
 
-  it("resolves telegram qa repo-root-relative paths before dispatching", async () => {
-    await runQaTelegramCommand({
-      repoRoot: "/tmp/openclaw-repo",
-      outputDir: ".artifacts/qa/telegram",
-      providerMode: "live-frontier",
-      primaryModel: "openai/gpt-5.6-luna",
-      alternateModel: "openai/gpt-5.6-luna",
-      fastMode: true,
-      scenarioIds: ["telegram-help-command"],
-      sutAccountId: "sut-live",
-    });
-
-    expect(runQaFlowSuiteFromRuntime).toHaveBeenCalledWith(
-      expect.objectContaining({
-        repoRoot: path.resolve("/tmp/openclaw-repo"),
-        outputDir: path.resolve("/tmp/openclaw-repo", ".artifacts/qa/telegram"),
-        providerMode: "live-frontier",
-        primaryModel: "openai/gpt-5.6-luna",
-        alternateModel: "openai/gpt-5.6-luna",
-        fastMode: true,
-        channelDriver: "live",
-        channelId: "telegram",
-        adapterOptions: expect.objectContaining({ sutAccountId: "sut-live" }),
-        scenarioIds: ["telegram-help-command"],
-      }),
-    );
-  });
-
   it("rejects output dirs that escape the repo root", () => {
     expect(() => resolveRepoRelativeOutputDir("/tmp/openclaw-repo", "../outside")).toThrow(
       "--output-dir must stay within the repo root.",
     );
     expect(() => resolveRepoRelativeOutputDir("/tmp/openclaw-repo", "/tmp/outside")).toThrow(
       "--output-dir must be a relative path inside the repo root.",
-    );
-  });
-
-  it("resolves the Telegram release profile when Commander supplies an empty scenario list", async () => {
-    await parseQa(["telegram"], { "repo-root": "/tmp/openclaw-repo" });
-
-    expect(runQaFlowSuiteFromRuntime).toHaveBeenCalledWith(
-      expect.objectContaining({
-        scenarioIds: expect.arrayContaining([
-          "telegram-commands-command",
-          "telegram-help-command",
-          "telegram-other-bot-command-gating",
-        ]),
-      }),
-    );
-  });
-
-  it("uses the trusted Telegram launcher for the shared suite gateway", async () => {
-    const {
-      candidateRoot,
-      boundaryDir,
-      launcherPath,
-      runtimeTempParent,
-      preloadPath,
-      runtimeEntryPath,
-    } = await prepareTelegramLauncher();
-    await runQaTelegramCommand({
-      repoRoot: candidateRoot,
-      scenarioIds: ["telegram-help-command", "telegram-commands-command"],
-    });
-
-    const sutOpenClawCommand = {
-      executablePath: launcherPath,
-      tempParentDir: runtimeTempParent,
-      usePackagedPlugins: true,
-      processBoundary: {
-        kind: "linux-proc-v1",
-        evidenceDir: boundaryDir,
-        expectedUid: 1001,
-        expectedGid: 1002,
-        forwardedEnvKeys: ["HOME", "PATH"],
-        runtimeExecutablePath: process.execPath,
-        runtimeArgsPrefix: ["--import", preloadPath, runtimeEntryPath],
-        terminationRetryTimeoutMs: 60_000,
-      },
-    };
-    expect(runQaFlowSuiteFromRuntime).toHaveBeenCalledWith(
-      expect.objectContaining({ sutOpenClawCommand }),
-    );
-  });
-
-  it.each(["relative", "non-decimal-uid", "non-executable"] as const)(
-    "rejects a %s Telegram launcher before starting a gateway",
-    async (kind) => {
-      let repoRoot: string | undefined;
-      let expected: string;
-      if (kind === "non-decimal-uid") {
-        ({ candidateRoot: repoRoot } = await prepareTelegramLauncher());
-        vi.stubEnv("OPENCLAW_QA_TELEGRAM_SUT_UID", "0x3e9");
-        expected = "OPENCLAW_QA_TELEGRAM_SUT_UID must be a positive integer.";
-      } else {
-        const launcherPath =
-          kind === "relative"
-            ? "relative-launcher"
-            : path.join(telegramArtifactsDir, "non-executable-launcher");
-        if (kind === "non-executable") {
-          await fs.writeFile(launcherPath, "#!/bin/sh\nexit 0\n", { mode: 0o600 });
-        }
-        vi.stubEnv("OPENCLAW_QA_TELEGRAM_SUT_OPENCLAW_COMMAND", launcherPath);
-        expected =
-          kind === "relative"
-            ? "OPENCLAW_QA_TELEGRAM_SUT_OPENCLAW_COMMAND must be an absolute file path."
-            : `OPENCLAW_QA_TELEGRAM_SUT_OPENCLAW_COMMAND must point to an executable regular file: ${launcherPath}`;
-      }
-      await expect(
-        runQaTelegramCommand({ repoRoot, scenarioIds: ["telegram-help-command"] }),
-      ).rejects.toThrow(expected);
-      expect(runQaFlowSuiteFromRuntime).not.toHaveBeenCalled();
-    },
-  );
-
-  it("rejects unknown mixed Telegram selections before resolving the SUT launcher", async () => {
-    vi.stubEnv("OPENCLAW_QA_TELEGRAM_SUT_OPENCLAW_COMMAND", "relative-launcher");
-    await expect(
-      runQaTelegramCommand({
-        scenarioIds: ["telegram-help-command", "missing-telegram-scenario"],
-      }),
-    ).rejects.toThrow("unknown QA scenario id(s): missing-telegram-scenario");
-
-    expect(runQaFlowSuiteFromRuntime).not.toHaveBeenCalled();
-  });
-
-  it("prints telegram scenario catalog without resolving the SUT launcher", async () => {
-    vi.stubEnv("OPENCLAW_QA_TELEGRAM_SUT_OPENCLAW_COMMAND", "relative-launcher");
-    await runQaTelegramCommand({
-      repoRoot: "/tmp/openclaw-repo",
-      providerMode: "mock-openai",
-      listScenarios: true,
-    });
-
-    expect(runQaFlowSuiteFromRuntime).not.toHaveBeenCalled();
-    expectWriteContains(
-      stdoutWrite,
-      "telegram-status-command\tdefault\tTelegram status command reply\tVerify Telegram status returns model, session, and activation details. refs=openclaw/openclaw#74698",
     );
   });
 
@@ -1797,59 +1616,14 @@ describe("qa cli", () => {
   });
   it.each([
     {
-      command: "run",
-      flags: {
-        transport: "discord",
-        scenario: "discord-status-reactions-tool-only",
-        baseline: "origin/main",
-        candidate: "HEAD",
-        "skip-install": true,
-        "skip-build": true,
-      },
-      mock: runMantisBeforeAfterCommand,
-      expected: {
-        baseline: "origin/main",
-        candidate: "HEAD",
-        transport: "discord",
-        scenario: "discord-status-reactions-tool-only",
-        credentialSource: "convex",
-        credentialRole: "ci",
-        fastMode: true,
-        providerMode: "live-frontier",
-        signal: expect.any(AbortSignal),
-        skipBuild: true,
-        skipInstall: true,
-      },
-    },
-    {
       command: "desktop-browser-smoke",
       flags: { class: "beast", "keep-lease": true },
       mock: runMantisDesktopBrowserSmokeCommand,
       expected: { machineClass: "beast", keepLease: true },
     },
-    {
-      command: "slack-desktop-smoke",
-      flags: {
-        "machine-class": "beast",
-        model: "openai/gpt-5.6-luna",
-        "alt-model": "openai/gpt-5.6-terra",
-        scenario: "slack-canary",
-        fast: true,
-      },
-      mock: runMantisSlackDesktopSmokeCommand,
-      expected: {
-        machineClass: "beast",
-        primaryModel: "openai/gpt-5.6-luna",
-        alternateModel: "openai/gpt-5.6-terra",
-        scenarioIds: ["slack-canary"],
-        fastMode: true,
-        gatewaySetup: undefined,
-      },
-    },
   ] satisfies Array<{
     command: string;
     flags: Parameters<typeof parseQa>[1];
-    mock: typeof runMantisBeforeAfterCommand;
     expected: Record<string, unknown>;
   }>)(
     "routes Mantis $command options and authority",

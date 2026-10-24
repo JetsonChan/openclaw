@@ -568,13 +568,12 @@ describe("qa-lab server", () => {
 
     const response = await postLabJson(lab.baseUrl, "/api/scenario/suite", {
       profile: "all",
-      channel: "buzz",
-      channelDriver: "live",
+      channelDriver: "qa-channel",
       providerMode: "mock-openai",
       scenarioIds: ["channel-canary"],
     });
 
-    expect(response.status).toBe(202);
+    expect(response.status, JSON.stringify(await response.clone().json())).toBe(202);
     const payload = (await response.json()) as {
       plan: {
         selectedScenarios: Array<{
@@ -588,14 +587,13 @@ describe("qa-lab server", () => {
       expect.objectContaining({
         id: "channel-canary",
         declaredChannel: null,
-        effectiveChannel: "buzz",
+        effectiveChannel: "qa-channel",
       }),
     ]);
     await vi.waitFor(() => expect(suiteLaunchMock.runQaSuite).toHaveBeenCalledTimes(1));
     expect(suiteLaunchMock.runQaSuite).toHaveBeenCalledWith(
       expect.objectContaining({
-        channelDriver: "live",
-        channelId: "buzz",
+        channelDriver: "qa-channel",
         scenarioIds: ["channel-canary"],
       }),
     );
@@ -749,7 +747,7 @@ describe("qa-lab server", () => {
       channel: "telegram",
       channelDriver: "crabline",
       providerMode: "live-frontier",
-      scenarioIds: ["matrix-room-block-streaming"],
+      scenarioIds: ["channel-message-flows"],
     });
 
     expect(response.status).toBe(400);
@@ -757,9 +755,7 @@ describe("qa-lab server", () => {
       plan: { exclusions: Array<{ scenarioId: string; reasons: string[] }> };
     };
     expect(payload.plan.exclusions).toEqual(
-      expect.arrayContaining([
-        expect.objectContaining({ scenarioId: "matrix-room-block-streaming" }),
-      ]),
+      expect.arrayContaining([expect.objectContaining({ scenarioId: "channel-message-flows" })]),
     );
     expect(suiteLaunchMock.runQaSuite).not.toHaveBeenCalled();
   });
@@ -922,16 +918,7 @@ describe("qa-lab server", () => {
       "release",
       "all",
     ]);
-    expect(bootstrap.runnerCatalog.channels).toEqual([
-      "buzz",
-      "discord",
-      "matrix",
-      "msteams",
-      "qa-channel",
-      "slack",
-      "telegram",
-      "whatsapp",
-    ]);
+    expect(bootstrap.runnerCatalog.channels).toEqual(["qa-channel"]);
 
     const startupStatus = (await (
       await fetchWithRetry(`${lab.baseUrl}/api/capture/startup-status`)

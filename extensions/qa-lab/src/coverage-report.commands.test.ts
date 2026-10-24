@@ -76,10 +76,7 @@ function selectReportedCommands(scenarios: QaSeedScenarioWithSource[]) {
 
 describe("QA coverage command selection", () => {
   it.each([
-    ["telegram-assistant-transcript-role-boundary", "crabline"],
-    ["matrix-room-generated-image-delivery", "live"],
     ["remember-across-conversations", "qa-channel"],
-    ["whatsapp-access-control-group-disabled", "live"],
     ["instruction-followthrough-repo-contract", "qa-channel"],
     ["agent-startup-instruction-first-action", "qa-channel"],
     ["channel-canary", "qa-channel"],

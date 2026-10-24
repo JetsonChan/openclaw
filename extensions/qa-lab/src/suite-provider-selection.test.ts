@@ -3,51 +3,36 @@ import { access, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promise
 import os from "node:os";
 import path from "node:path";
 import { describe, expect, it, vi } from "vitest";
-import type { QaTransportAdapterFactory } from "./qa-transport-registry.js";
 import { runQaSuite } from "./suite-launch.runtime.js";
 import { runQaFlowSuiteFromRuntime } from "./suite-run.runtime.js";
 
 describe("qa suite provider selection", () => {
-  it.each([
-    {
-      scenarioId: "matrix-room-block-streaming",
-      channelDriver: "live" as const,
-      channelId: "matrix",
-      adapterFactories: [
-        {
-          id: "matrix",
-          supportsModuleFlows: true,
-          matches: ({ driver, channelId }) => driver === "live" && channelId === "matrix",
-          create: async () => {
-            throw new Error("Matrix adapter creation must remain unreachable");
-          },
-        } satisfies QaTransportAdapterFactory,
-      ],
-    },
-    { scenarioId: "subagent-completion-direct-fallback", adapterFactories: undefined },
-  ])("adopts the provider requirement for directly selected $scenarioId", async (selection) => {
-    const repoRoot = await mkdtemp(path.join(os.tmpdir(), "qa-suite-provider-lane-"));
-    const startLab = vi.fn(async () => {
-      throw new Error("selected provider lane reached lab startup");
-    });
+  it.each([{ scenarioId: "subagent-completion-direct-fallback", adapterFactories: undefined }])(
+    "adopts the provider requirement for directly selected $scenarioId",
+    async (selection) => {
+      const repoRoot = await mkdtemp(path.join(os.tmpdir(), "qa-suite-provider-lane-"));
+      const startLab = vi.fn(async () => {
+        throw new Error("selected provider lane reached lab startup");
+      });
 
-    try {
-      await expect(
-        runQaFlowSuiteFromRuntime({
-          repoRoot,
-          scenarioIds: [selection.scenarioId],
-          ...("channelDriver" in selection
-            ? { channelDriver: selection.channelDriver, channelId: selection.channelId }
-            : {}),
-          adapterFactories: selection.adapterFactories,
-          startLab,
-        }),
-      ).rejects.toThrow("selected provider lane reached lab startup");
-      expect(startLab).toHaveBeenCalledOnce();
-    } finally {
-      await rm(repoRoot, { recursive: true, force: true });
-    }
-  });
+      try {
+        await expect(
+          runQaFlowSuiteFromRuntime({
+            repoRoot,
+            scenarioIds: [selection.scenarioId],
+            ...("channelDriver" in selection
+              ? { channelDriver: selection.channelDriver, channelId: selection.channelId }
+              : {}),
+            adapterFactories: selection.adapterFactories,
+            startLab,
+          }),
+        ).rejects.toThrow("selected provider lane reached lab startup");
+        expect(startLab).toHaveBeenCalledOnce();
+      } finally {
+        await rm(repoRoot, { recursive: true, force: true });
+      }
+    },
+  );
 
   it("invalidates prior terminal artifacts before replacement startup fails", async () => {
     const repoRoot = await mkdtemp(path.join(os.tmpdir(), "qa-suite-generation-"));

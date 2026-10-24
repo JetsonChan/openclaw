@@ -10,6 +10,7 @@ import {
 } from "./coverage-report.js";
 import { readQaScenarioPack, type QaSeedScenarioWithSource } from "./scenario-catalog.js";
 import { readQaScorecardTaxonomyReport, type QaMaturityTaxonomy } from "./scorecard-taxonomy.js";
+import { makeQaSuiteTestScenario } from "./suite-test-helpers.js";
 
 const TEST_EXECUTABLE_CATEGORY_ID = "agent-runtime.agent-turn-execution";
 const TEST_EXECUTABLE_COVERAGE_ID = "agent-runtime.dm";
@@ -438,25 +439,25 @@ describe("qa coverage report", () => {
     ]);
   });
 
-  it.each([
-    ["buzz", "channel-canary"],
-    ["telegram", "channel-workspace-relative-media"],
-  ] as const)("finds the %s transport declared by %s", (channel, scenarioId) => {
-    const match = findQaScenarioMatches(readQaScenarioPack().scenarios, channel).find(
-      (candidate) => candidate.id === scenarioId,
-    );
+  it.each([["qa-channel", "channel-canary"]] as const)(
+    "finds the %s transport declared by %s",
+    (channel, scenarioId) => {
+      const match = findQaScenarioMatches(readQaScenarioPack().scenarios, channel).find(
+        (candidate) => candidate.id === scenarioId,
+      );
 
-    expect(match).toMatchObject({ id: scenarioId, channel });
-  });
+      expect(match).toMatchObject({ id: scenarioId, channel });
+    },
+  );
 
-  it.each([
-    ["active-memory-preprompt-recall", "mock-openai"],
-    ["discord-transcripts-voice-authorization", "live-frontier"],
-  ] as const)("reports the canonical provider mode for %s", (scenarioId, providerMode) => {
-    expect(findQaScenarioMatches(readQaScenarioPack().scenarios, scenarioId)).toContainEqual(
-      expect.objectContaining({ id: scenarioId, requiredProviderMode: providerMode }),
-    );
-  });
+  it.each([["active-memory-preprompt-recall", "mock-openai"]] as const)(
+    "reports the canonical provider mode for %s",
+    (scenarioId, providerMode) => {
+      expect(findQaScenarioMatches(readQaScenarioPack().scenarios, scenarioId)).toContainEqual(
+        expect.objectContaining({ id: scenarioId, requiredProviderMode: providerMode }),
+      );
+    },
+  );
 
   it.each([
     ["Gateway loopback and LAN access", "docker-gateway-network"],
@@ -539,19 +540,15 @@ describe("qa coverage report", () => {
   });
 
   it("splits flow commands across channel lanes", () => {
-    const scenarios = readQaScenarioPack().scenarios;
-    const matches = [
-      ...findQaScenarioMatches(scenarios, "dm-per-room-session"),
-      ...findQaScenarioMatches(scenarios, "whatsapp-access-control-group-disabled"),
+    const scenarios = [
+      makeQaSuiteTestScenario("first-channel", { channel: "imessage" }),
+      makeQaSuiteTestScenario("second-channel", { channel: "qa-channel" }),
     ];
+    const matches = scenarios.flatMap((scenario) => findQaScenarioMatches(scenarios, scenario.id));
     const report = renderQaScenarioMatchesMarkdownReport({ query: "channel lanes", matches });
 
-    expect(report).toContain(
-      "--channel-driver live --channel matrix --scenario dm-per-room-session",
-    );
-    expect(report).toContain(
-      "--channel-driver live --channel whatsapp --scenario whatsapp-access-control-group-disabled",
-    );
+    expect(report).toContain("--channel-driver live --channel imessage --scenario first-channel");
+    expect(report).toContain("pnpm openclaw qa suite --scenario second-channel");
   });
 
   it("splits qa suite targets when matches mix execution kinds", () => {

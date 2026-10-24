@@ -3,7 +3,6 @@ packages:
   - ui
   - packages/*
   - extensions/*
-  - "!extensions/qa-lab"
 
 minimumReleaseAge: 10080
 minimumReleaseAgeStrict: true

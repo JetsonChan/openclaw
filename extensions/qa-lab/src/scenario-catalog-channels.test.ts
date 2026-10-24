@@ -17,49 +17,6 @@ import { projectQaToolActivity } from "./tool-activity.js";
 
 const tempDirs = useAutoCleanupTempDirTracker(afterEach);
 
-const telegramStreamingFinalScenarios = [
-  {
-    scenarioId: "telegram-stream-final-single-message",
-    finalTexts: ["QA-TELEGRAM-STREAM-SINGLE-OK"],
-  },
-  {
-    scenarioId: "telegram-long-final-reuses-preview",
-    finalTexts: ["TELEGRAM-LONG-FINAL-BEGIN first", "second TELEGRAM-LONG-FINAL-END"],
-  },
-  {
-    scenarioId: "telegram-long-final-three-chunks",
-    finalTexts: [
-      "TELEGRAM-LONG-FINAL-3CHUNK-BEGIN first",
-      "second final chunk",
-      "third TELEGRAM-LONG-FINAL-3CHUNK-END",
-    ],
-  },
-] as const;
-
-function runTelegramStreamingFinalScenario(params: {
-  scenarioId: string;
-  finalTexts: readonly string[];
-}) {
-  return runLoadedScenarioFlow(params.scenarioId, {
-    state: createQaBusState(),
-    onWaitForOutboundMessage: ({ state }) => {
-      const preview = state.addOutboundMessage({
-        accountId: "qa-channel",
-        to: "channel:telegram-stream-room",
-        text: "deleted streaming preview",
-      });
-      state.deleteMessage({ accountId: "qa-channel", messageId: preview.id });
-      for (const text of params.finalTexts) {
-        state.addOutboundMessage({
-          accountId: "qa-channel",
-          to: "channel:telegram-stream-room",
-          text,
-        });
-      }
-    },
-  });
-}
-
 function runFanoutScenario(
   options: {
     receipt?:
@@ -171,88 +128,6 @@ function runFanoutScenario(
 describe("qa scenario catalog channel contracts", () => {
   const agentRuntime = "agent-runtime";
 
-  it("runs the Telegram RTT exact-marker scenario through an isolated direct message", () => {
-    const scenario = requireFlowScenario(readQaScenarioById("telegram-reply-chain-exact-marker"));
-    expect(scenario.execution.transportPolicy).toEqual({ directMessageOnly: true });
-    expect(scenario.execution.flow?.steps[0]?.actions).toEqual(
-      expect.arrayContaining([
-        expect.objectContaining({
-          sendInbound: expect.objectContaining({
-            conversation: { id: "telegram-reply-chain-dm", kind: "direct" },
-          }),
-        }),
-        expect.objectContaining({
-          waitForOutbound: expect.objectContaining({
-            conversation: { id: "telegram-reply-chain-dm", kind: "direct" },
-          }),
-        }),
-      ]),
-    );
-  });
-
-  it("routes native command session targeting through Crabline Telegram", () => {
-    const scenario = readQaScenarioById("native-command-session-target");
-    const config = readQaScenarioExecutionConfig("native-command-session-target") as
-      | {
-          requiredChannelDriver?: string;
-          requiredProviderMode?: string;
-        }
-      | undefined;
-
-    expect(scenario.execution.channel).toBe("telegram");
-    expect(scenario.execution.channels).toEqual(["telegram"]);
-    expect(config?.requiredProviderMode).toBe("mock-openai");
-    expect(config?.requiredChannelDriver).toBe("crabline");
-    const flow = JSON.stringify(requireFlowScenario(scenario).execution.flow);
-    expect(flow).toContain("transport.buildAgentDelivery");
-    expect(flow).toContain("peer: { kind: 'group', id: delivery.replyTo }");
-  });
-
-  it("keeps channel-owned scenarios independent from the driver implementation", () => {
-    const channelByScenarioId = new Map<string, { channel: string; sharedCall?: string }>([
-      [
-        "matrix-restart-resume",
-        { channel: "matrix", sharedCall: "env.gateway.restartAfterStateMutation" },
-      ],
-      [
-        "slack-restart-resume",
-        { channel: "slack", sharedCall: "env.gateway.restartAfterStateMutation" },
-      ],
-      [
-        "whatsapp-restart-resume",
-        { channel: "whatsapp", sharedCall: "env.gateway.restartAfterStateMutation" },
-      ],
-      [
-        "whatsapp-access-control-dm-disabled",
-        { channel: "whatsapp", sharedCall: "config.expectReply" },
-      ],
-      [
-        "whatsapp-access-control-dm-open",
-        { channel: "whatsapp", sharedCall: "config.expectReply" },
-      ],
-      [
-        "whatsapp-access-control-group-disabled",
-        { channel: "whatsapp", sharedCall: "config.expectReply" },
-      ],
-      [
-        "whatsapp-access-control-group-open",
-        { channel: "whatsapp", sharedCall: "config.expectReply" },
-      ],
-      ["whatsapp-pairing-block", { channel: "whatsapp" }],
-      ["matrix-allowlist-hot-reload", { channel: "matrix" }],
-    ]);
-
-    for (const [scenarioId, expected] of channelByScenarioId) {
-      const scenario = requireFlowScenario(readQaScenarioById(scenarioId));
-      expect(scenario.execution.channel, scenarioId).toBe(expected.channel);
-      if (expected.sharedCall) {
-        expect(scenario.execution.flowKind, scenarioId).toBe("steps");
-        expect(scenario.execution.suiteIsolation, scenarioId).toBe("isolated");
-        expect(JSON.stringify(scenario.execution.flow), scenarioId).toContain(expected.sharedCall);
-      }
-    }
-  });
-
   it("keeps the memory channel-context proof on the internal QA channel", () => {
     expect(readQaScenarioById("memory-tools-channel-context").execution.channel).toBe("qa-channel");
   });
@@ -298,23 +173,6 @@ describe("qa scenario catalog channel contracts", () => {
     expect(flow).not.toContain('"call":"runAgentPrompt"');
   });
 
-  it("preserves module flow identity without mutating the driver contract", () => {
-    for (const scenarioId of [
-      "matrix-approval-exec-metadata-single-event",
-      "matrix-mxid-prefixed-command-block",
-      "slack-codex-approval-exec-native",
-      "slack-codex-approval-plugin-native",
-      "slack-progress-commentary-verbose-full",
-    ]) {
-      const scenario = requireFlowScenario(readQaScenarioById(scenarioId));
-      expect(scenario.execution.flowKind, scenarioId).toBe("module");
-      expect(
-        readQaScenarioExecutionConfig(scenarioId)?.requiredChannelDriver,
-        scenarioId,
-      ).toBeUndefined();
-    }
-  });
-
   it("binds current-source thread receipt proof to the QA Gateway lane", () => {
     const scenario = requireFlowScenario(
       readQaScenarioById("thread-reply-current-source-delivery"),
@@ -338,82 +196,12 @@ describe("qa scenario catalog channel contracts", () => {
     expect(flow).toContain("QA-THREAD-RECEIPT-FINAL-OK");
   });
 
-  it("keeps the Teams final-dedupe proof on the real Gateway transport", () => {
-    const scenario = requireFlowScenario(
-      readQaScenarioById("msteams-thread-message-tool-final-dedupe"),
-    );
-    const flow = JSON.stringify(scenario.execution.flow);
-
-    expect(scenario.execution.channel).toBe("msteams");
-    expect(scenario.execution.suiteIsolation).toBe("isolated");
-    expect(scenario.gatewayConfigPatch).toMatchObject({
-      messages: { groupChat: { visibleReplies: "automatic" } },
-      tools: { alsoAllow: ["message"] },
-      agents: { entries: { qa: { tools: { alsoAllow: ["message"] } } } },
-    });
-    expect(flow).toContain("QA-MSTEAMS-SAME-OK");
-    expect(flow).toContain("QA-MSTEAMS-OTHER-THREAD-OK");
-    expect(flow).toContain("QA-MSTEAMS-OTHER-CONVERSATION-OK");
-    expect(flow).toContain("QA-MSTEAMS-DM-OK");
-    expect(flow).toContain("QA-MSTEAMS-GROUP-OK");
-  });
-
-  it("proves ambiguous Teams delivery at the Gateway send boundary", () => {
-    const scenario = requireFlowScenario(readQaScenarioById("msteams-ambiguous-gateway-timeout"));
-    const flow = JSON.stringify(scenario.execution.flow);
-
-    expect(flow).toContain("env.gateway.call('send'");
-    expect(flow.match(/env\.gateway\.call\('send'/g)).toHaveLength(2);
-    expect(flow).toContain("idempotencyKey: randomUUID(), message: config.seedMarker");
-    expect(flow).toContain("sendError.includes('504')");
-    expect(flow).toContain("matchingOutbound.length === 1");
-    expect(flow).toContain("seed proactive conversation reference");
-    expect(flow.match(/"resetTransport":true/g)).toHaveLength(1);
-    expect(flow.match(/"waitForOutbound"/g)).toHaveLength(1);
-    expect(flow).toContain("conversation:19:ambiguous-timeout@thread.tacv2");
-    expect(scenario.execution.config).toMatchObject({
-      seedMarker: "QA-MSTEAMS-CONVERSATION-READY",
-    });
-  });
-
-  it("keeps Telegram semantic receipts and compaction previews order-independent", () => {
-    const semantic = requireFlowScenario(
-      readQaScenarioById("telegram-semantic-formatting-boundaries"),
-    );
-    const compaction = requireFlowScenario(
-      readQaScenarioById("telegram-claude-cli-compaction-final-priority"),
-    );
-    const semanticFlow = JSON.stringify(semantic.execution.flow);
-    const compactionFlow = JSON.stringify(compaction.execution.flow);
-
-    expect(semanticFlow).toContain(
-      "readTelegramMessages().slice(startIndex).some((message) => String(message.botApiMessageId) === String(receipt.messageId))",
-    );
-    expect(semanticFlow).not.toContain("received.at(-1)?.botApiMessageId");
-    expect(semanticFlow).not.toContain('"set":"expectedNormalized"');
-    expect(semanticFlow).toContain("actual.length === fixture.expectedChunks.length");
-    expect(semanticFlow).toContain("entity.type['@type'] === expectedEntity.type['@type']");
-    expect(semanticFlow).toContain("entity.type.url === expectedEntity.type.url");
-    expect(semanticFlow).toContain("entity.type.language === expectedEntity.type.language");
-    expect(semanticFlow).not.toContain("JSON.stringify(actual) === JSON.stringify");
-    expect(compactionFlow).toContain('"minimumPreviewEvents":2');
-    expect(compactionFlow).toContain("progress: { commentary: true, toolProgress: true }");
-    expect(compactionFlow).toContain("config.commentaryOne");
-    expect(compactionFlow).toContain("config.commentaryTwo");
-    expect(compactionFlow).toContain("Compacting context");
-  });
-
   it("isolates scenarios that own asynchronous transport state", () => {
     const channelBaseline = requireFlowScenario(readQaScenarioById("channel-chat-baseline"));
     const subagentFanout = requireFlowScenario(readQaScenarioById("subagent-fanout-synthesis"));
-    const matrixProgress = requireFlowScenario(
-      readQaScenarioById("matrix-room-tool-progress-mention-safety"),
-    );
 
     expect(channelBaseline.execution.suiteIsolation).toBe("isolated");
     expect(subagentFanout.execution.suiteIsolation).toBe("isolated");
-    expect(matrixProgress.execution.suiteIsolation).toBe("isolated");
-    expect(matrixProgress.execution.isolationReason).toContain("streaming progress configuration");
   });
 
   it.each(["live-frontier", "mock-openai"] as const)(
@@ -497,45 +285,21 @@ describe("qa scenario catalog channel contracts", () => {
     expect(flow).not.toContain('"call":"sleep"');
   });
 
-  it("keeps channel streaming evidence portable across QA Channel and Crabline Telegram", () => {
+  it("keeps channel streaming evidence on QA Channel", () => {
     const scenario = requireFlowScenario(readQaScenarioById("channel-message-flows"));
 
     expect(scenario.execution.channel).toBeUndefined();
-    expect(scenario.execution.channels).toEqual(["qa-channel", "telegram"]);
+    expect(scenario.execution.channels).toEqual(["qa-channel"]);
     expect(scenario.execution.retryCount).toBe(0);
     expect(scenario.coverage?.primary).toEqual(["channels.streaming-final-reply"]);
     expect(scenario.coverage?.secondary).toEqual([`${agentRuntime}.streaming-replies-delivery`]);
-    expect(scenario.gatewayConfigPatch).toMatchObject({
-      channels: { telegram: { streaming: { mode: "partial" } } },
-    });
-    expect(scenario.gatewayConfigPatch).not.toHaveProperty("channels.telegram.groups");
-  });
-
-  it.each(telegramStreamingFinalScenarios)(
-    "counts only visible Telegram finals for $scenarioId after deleting its preview",
-    async (scenario) => {
-      await expect(runTelegramStreamingFinalScenario(scenario)).resolves.toMatchObject({
-        status: "pass",
-      });
-    },
-  );
-
-  it("rejects a deleted Telegram preview standing in for a missing final chunk", async () => {
-    await expect(
-      runTelegramStreamingFinalScenario({
-        scenarioId: "telegram-long-final-three-chunks",
-        finalTexts: [
-          "TELEGRAM-LONG-FINAL-3CHUNK-BEGIN first",
-          "second TELEGRAM-LONG-FINAL-3CHUNK-END",
-        ],
-      }),
-    ).rejects.toThrow("expected three complete final chunks; saw 2");
+    expect(scenario.gatewayConfigPatch).toBeUndefined();
   });
 
   it("keeps the shared channel canary eligible for its supported channels", () => {
     const scenario = requireFlowScenario(readQaScenarioById("channel-canary"));
 
-    expect(scenario.execution.channels).toEqual(["qa-channel", "telegram", "buzz", "msteams"]);
+    expect(scenario.execution.channels).toEqual(["qa-channel"]);
   });
 
   it.each([
@@ -609,18 +373,6 @@ describe("qa scenario catalog channel contracts", () => {
         .filter((message) => message.direction === "outbound")
         .map((message) => senderIdsByInboundId.get(message.replyToId ?? "")),
     ).toEqual([...(observerReplies ? ["observer"] : []), ...(driverReplies ? ["driver"] : [])]);
-  });
-
-  it("keeps transcript-role delivery on the Crabline driver", () => {
-    const scenario = readQaScenarioById("telegram-assistant-transcript-role-boundary");
-    const config = readQaScenarioExecutionConfig("telegram-assistant-transcript-role-boundary") as
-      | {
-          requiredChannelDriver?: string;
-        }
-      | undefined;
-
-    expect(scenario.gatewayConfigPatch).toBeUndefined();
-    expect(config?.requiredChannelDriver).toBe("crabline");
   });
 
   it("rejects malformed string matcher lists before running a flow", async () => {

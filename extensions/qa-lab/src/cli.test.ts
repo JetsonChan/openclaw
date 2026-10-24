@@ -52,11 +52,7 @@ const {
   runQaProfileCommand,
   runQaProviderServerCommand,
   runQaSuiteCommand,
-  runQaTelegramCommand,
-  runMantisBeforeAfterCommand,
   runMantisDesktopBrowserSmokeCommand,
-  runMantisDiscordSmokeCommand,
-  runMantisSlackDesktopSmokeCommand,
 } = vi.hoisted(() => ({
   runQaCredentialsAddCommand: vi.fn(),
   runQaCredentialsListCommand: vi.fn(),
@@ -68,11 +64,7 @@ const {
   runQaProfileCommand: vi.fn(),
   runQaProviderServerCommand: vi.fn(),
   runQaSuiteCommand: vi.fn(),
-  runQaTelegramCommand: vi.fn(),
-  runMantisBeforeAfterCommand: vi.fn(),
   runMantisDesktopBrowserSmokeCommand: vi.fn(),
-  runMantisDiscordSmokeCommand: vi.fn(),
-  runMantisSlackDesktopSmokeCommand: vi.fn(),
 }));
 
 const { listQaRunnerCliContributions } = vi.hoisted(() => ({
@@ -80,15 +72,6 @@ const { listQaRunnerCliContributions } = vi.hoisted(() => ({
     createAvailableQaRunnerContribution(),
   ]),
 }));
-
-function requireQaTelegramOptions() {
-  const [call] = runQaTelegramCommand.mock.calls;
-  if (!call) {
-    throw new Error("expected qa telegram command call");
-  }
-  const [options] = call;
-  return options;
-}
 
 function requireQaSuiteOptions() {
   const [call] = runQaSuiteCommand.mock.calls;
@@ -104,15 +87,8 @@ vi.mock("openclaw/plugin-sdk/qa-runner-runtime", async (importOriginal) => ({
   listQaRunnerCliContributions,
 }));
 
-vi.mock("./live-transports/telegram/cli.runtime.js", () => ({
-  runQaTelegramCommand,
-}));
-
 vi.mock("./mantis/cli.runtime.js", () => ({
-  runMantisBeforeAfterCommand,
   runMantisDesktopBrowserSmokeCommand,
-  runMantisDiscordSmokeCommand,
-  runMantisSlackDesktopSmokeCommand,
 }));
 
 vi.mock("./cli.runtime.js", () => ({
@@ -149,11 +125,7 @@ describe("qa cli registration", () => {
     runQaProfileCommand.mockReset();
     runQaProviderServerCommand.mockReset();
     runQaSuiteCommand.mockReset();
-    runQaTelegramCommand.mockReset();
-    runMantisBeforeAfterCommand.mockReset();
     runMantisDesktopBrowserSmokeCommand.mockReset();
-    runMantisDiscordSmokeCommand.mockReset();
-    runMantisSlackDesktopSmokeCommand.mockReset();
     listQaRunnerCliContributions
       .mockReset()
       .mockReturnValue([createAvailableQaRunnerContribution()]);
@@ -171,7 +143,7 @@ describe("qa cli registration", () => {
     }
     const commandNames = qa.commands.map((command) => command.name());
     expect(commandNames).toContain(TEST_QA_RUNNER.commandName);
-    expect(commandNames).toContain("telegram");
+    expect(commandNames).not.toContain("telegram");
     expect(commandNames).toContain("mantis");
     expect(commandNames).toContain("credentials");
     expect(commandNames).toContain("coverage");
@@ -349,79 +321,6 @@ describe("qa cli registration", () => {
     expect(runQaProfileCommand).not.toHaveBeenCalled();
   });
 
-  it("routes mantis discord-smoke flags into the mantis runtime command", async () => {
-    await parseQa([
-      "mantis",
-      "discord-smoke",
-      "--repo-root",
-      "/tmp/openclaw-repo",
-      "--output-dir",
-      ".artifacts/qa-e2e/mantis/discord-smoke",
-      "--guild-id",
-      "123456789012345678",
-      "--channel-id",
-      "223456789012345678",
-      "--token-file",
-      "/tmp/mantis-token",
-      "--message",
-      "hello from mantis",
-      "--skip-post",
-    ]);
-
-    expect(runMantisDiscordSmokeCommand).toHaveBeenCalledWith({
-      repoRoot: "/tmp/openclaw-repo",
-      outputDir: ".artifacts/qa-e2e/mantis/discord-smoke",
-      guildId: "123456789012345678",
-      channelId: "223456789012345678",
-      tokenEnv: undefined,
-      tokenFile: "/tmp/mantis-token",
-      tokenFileEnv: undefined,
-      message: "hello from mantis",
-      skipPost: true,
-    });
-  });
-
-  it("routes mantis before/after flags into the mantis runtime command", async () => {
-    await parseQa([
-      "mantis",
-      "run",
-      "--transport",
-      "discord",
-      "--scenario",
-      "discord-status-reactions-tool-only",
-      "--baseline",
-      "origin/main",
-      "--candidate",
-      "HEAD",
-      "--repo-root",
-      "/tmp/openclaw-repo",
-      "--output-dir",
-      ".artifacts/qa-e2e/mantis/local-discord-status-reactions",
-      "--credential-source",
-      "convex",
-      "--credential-role",
-      "maintainer",
-      "--skip-install",
-      "--skip-build",
-    ]);
-
-    expect(runMantisBeforeAfterCommand).toHaveBeenCalledWith({
-      baseline: "origin/main",
-      candidate: "HEAD",
-      credentialRole: "maintainer",
-      credentialSource: "convex",
-      fastMode: true,
-      outputDir: ".artifacts/qa-e2e/mantis/local-discord-status-reactions",
-      providerMode: "live-frontier",
-      repoRoot: "/tmp/openclaw-repo",
-      scenario: "discord-status-reactions-tool-only",
-      signal: expect.any(AbortSignal),
-      skipBuild: true,
-      skipInstall: true,
-      transport: "discord",
-    });
-  });
-
   it("routes mantis desktop browser smoke flags into the mantis runtime command", async () => {
     await parseQa([
       "mantis",
@@ -479,73 +378,6 @@ describe("qa cli registration", () => {
       provider: undefined,
       repoRoot: "/tmp/openclaw-repo",
       ttl: undefined,
-    });
-  });
-
-  it("routes mantis Slack desktop smoke flags into the mantis runtime command", async () => {
-    await parseQa([
-      "mantis",
-      "slack-desktop-smoke",
-      "--repo-root",
-      "/tmp/openclaw-repo",
-      "--output-dir",
-      ".artifacts/qa-e2e/mantis/slack-desktop",
-      "--crabbox-bin",
-      "/tmp/crabbox",
-      "--provider",
-      "hetzner",
-      "--market",
-      "on-demand",
-      "--machine-class",
-      "beast",
-      "--lease-id",
-      "cbx_123abc",
-      "--fresh-pr",
-      "openclaw/openclaw#85141",
-      "--idle-timeout",
-      "45m",
-      "--ttl",
-      "120m",
-      "--slack-url",
-      "https://app.slack.com/client/T123/C123",
-      "--provider-mode",
-      "live-frontier",
-      "--model",
-      "openai/gpt-5.6-luna",
-      "--alt-model",
-      "openai/gpt-5.6-luna",
-      "--scenario",
-      "slack-canary",
-      "--credential-source",
-      "env",
-      "--credential-role",
-      "maintainer",
-      "--fast",
-      "--keep-lease",
-    ]);
-
-    expect(runMantisSlackDesktopSmokeCommand).toHaveBeenCalledWith({
-      alternateModel: "openai/gpt-5.6-luna",
-      crabboxBin: "/tmp/crabbox",
-      credentialRole: "maintainer",
-      credentialSource: "env",
-      fastMode: true,
-      freshPr: "openclaw/openclaw#85141",
-      gatewaySetup: undefined,
-      idleTimeout: "45m",
-      keepLease: true,
-      leaseId: "cbx_123abc",
-      machineClass: "beast",
-      market: "on-demand",
-      outputDir: ".artifacts/qa-e2e/mantis/slack-desktop",
-      primaryModel: "openai/gpt-5.6-luna",
-      provider: "hetzner",
-      providerMode: "live-frontier",
-      repoRoot: "/tmp/openclaw-repo",
-      scenarioIds: ["slack-canary"],
-      slackChannelId: undefined,
-      slackUrl: "https://app.slack.com/client/T123/C123",
-      ttl: "120m",
     });
   });
 
@@ -697,25 +529,6 @@ describe("qa cli registration", () => {
     );
   });
 
-  it("routes telegram CLI defaults into the lane runtime", async () => {
-    await parseQa(["telegram"]);
-
-    expect(runQaTelegramCommand).toHaveBeenCalledWith({
-      repoRoot: undefined,
-      outputDir: undefined,
-      providerMode: "live-frontier",
-      primaryModel: undefined,
-      alternateModel: undefined,
-      fastMode: undefined,
-      allowFailures: false,
-      scenarioIds: [],
-      listScenarios: false,
-      sutAccountId: "sut",
-      credentialSource: undefined,
-      credentialRole: undefined,
-    });
-  });
-
   it.each([
     ["suite", ["qa", "suite"]],
     ["profile", ["qa", "run", "--qa-profile", "smoke-ci"]],
@@ -728,20 +541,6 @@ describe("qa cli registration", () => {
       runQaProfileCommand.mock.calls[0]?.[0] ??
       runQaManualLaneCommand.mock.calls[0]?.[0];
     expect(call?.fastMode).toBeUndefined();
-  });
-
-  it("forwards --list-scenarios for telegram runs", async () => {
-    await parseQa(["telegram", "--list-scenarios"]);
-
-    const options = requireQaTelegramOptions();
-    expect(options.listScenarios).toBe(true);
-  });
-
-  it("forwards --allow-failures for telegram runs", async () => {
-    await parseQa(["telegram", "--allow-failures"]);
-
-    const options = requireQaTelegramOptions();
-    expect(options.allowFailures).toBe(true);
   });
 
   it("forwards --allow-failures for suite runs", async () => {

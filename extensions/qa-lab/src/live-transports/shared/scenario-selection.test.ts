@@ -25,12 +25,9 @@ vi.mock("../../profile-planning.js", async (importOriginal) => {
 import { scenarioDeclaresQaChannel } from "../../profile-planning.js";
 import { readQaScenarioPack } from "../../scenario-catalog.js";
 import {
-  listTelegramQaScenarios,
-  resolveTelegramQaScenarioIds,
-} from "../telegram/scenario-selection.js";
-import {
   resolveCatalogLiveTransportQaScenarioIds,
   resolveLiveTransportQaScenarioIds,
+  listLiveTransportQaScenarios,
 } from "./scenario-selection.js";
 
 const MOCK_LANE = {
@@ -45,47 +42,12 @@ describe("live transport QA scenario selection", () => {
 
   it.each([
     {
-      channelId: "matrix",
+      channelId: "qa-channel",
       select: (scenarioIds?: readonly string[]) =>
         resolveCatalogLiveTransportQaScenarioIds({
           ...MOCK_LANE,
-          channelId: "matrix",
+          channelId: "qa-channel",
           scenarioIds,
-        }),
-    },
-    {
-      channelId: "telegram",
-      select: (scenarioIds?: readonly string[]) =>
-        resolveTelegramQaScenarioIds({ ...MOCK_LANE, scenarioIds }),
-    },
-    {
-      channelId: "discord",
-      select: (scenarioIds?: readonly string[]) =>
-        resolveLiveTransportQaScenarioIds({
-          ...MOCK_LANE,
-          channelId: "discord",
-          scenarioIds,
-          supportsModuleFlows: true,
-        }),
-    },
-    {
-      channelId: "slack",
-      select: (scenarioIds?: readonly string[]) =>
-        resolveLiveTransportQaScenarioIds({
-          ...MOCK_LANE,
-          channelId: "slack",
-          scenarioIds,
-          supportsModuleFlows: true,
-        }),
-    },
-    {
-      channelId: "whatsapp",
-      select: (scenarioIds?: readonly string[]) =>
-        resolveLiveTransportQaScenarioIds({
-          ...MOCK_LANE,
-          channelId: "whatsapp",
-          scenarioIds,
-          supportsModuleFlows: true,
         }),
     },
   ] as const)(
@@ -113,76 +75,27 @@ describe("live transport QA scenario selection", () => {
   it("uses the exact requested model for profile selection and listing", () => {
     const primaryModel = "openai/custom-selection-model";
 
-    resolveLiveTransportQaScenarioIds({
-      channelId: "telegram",
-      primaryModel,
-      providerMode: "mock-openai",
-    });
+    expect(() =>
+      resolveLiveTransportQaScenarioIds({
+        channelId: "qa-channel",
+        primaryModel,
+        providerMode: "mock-openai",
+      }),
+    ).toThrow("resolved no executable scenarios");
     expect(resolveProfileScenarios).toHaveBeenLastCalledWith(
       expect.objectContaining({ executionKind: "flow", primaryModel }),
     );
 
-    listTelegramQaScenarios({ primaryModel, providerMode: "mock-openai" });
-    expect(resolveExecutionSelection).toHaveBeenLastCalledWith(
+    expect(() =>
+      listLiveTransportQaScenarios({
+        channelId: "qa-channel",
+        primaryModel,
+        providerMode: "mock-openai",
+      }),
+    ).toThrow("resolved no executable scenarios");
+    expect(resolveProfileScenarios).toHaveBeenLastCalledWith(
       expect.objectContaining({ executionKind: "flow", primaryModel }),
     );
-  });
-
-  it.each([
-    { channelId: "matrix", scenarioId: "whatsapp-whoami-command", mismatch: "channel=whatsapp" },
-    {
-      channelId: "telegram",
-      scenarioId: "anthropic-opus-api-key-smoke",
-      mismatch: "provider=anthropic",
-    },
-  ] as const)(
-    "rejects $scenarioId from the $channelId lane",
-    ({ channelId, scenarioId, mismatch }) => {
-      expect(() =>
-        resolveCatalogLiveTransportQaScenarioIds({
-          ...MOCK_LANE,
-          channelId,
-          scenarioIds: [scenarioId],
-        }),
-      ).toThrow(mismatch);
-    },
-  );
-
-  it.each([
-    { channelId: "matrix", scenarioId: "thread-follow-up" },
-    { channelId: "telegram", scenarioId: "channel-canary" },
-    { channelId: "telegram", scenarioId: "channel-message-flows" },
-  ] as const)(
-    "keeps $scenarioId eligible through both $channelId drivers",
-    ({ channelId, scenarioId }) => {
-      const selectForDriver = (channelDriver: "crabline" | "live") =>
-        resolveCatalogLiveTransportQaScenarioIds({
-          ...MOCK_LANE,
-          channelId,
-          channelDriver,
-          scenarioIds: [scenarioId],
-        });
-
-      expect(selectForDriver("live")).toEqual([scenarioId]);
-      expect(selectForDriver("crabline")).toEqual([scenarioId]);
-    },
-  );
-
-  it.each([
-    {
-      channelId: "buzz",
-      scenarioIds: ["channel-canary", "channel-mention-gating"],
-    },
-    { channelId: "msteams", scenarioIds: ["channel-canary"] },
-  ])("keeps the $channelId plugin defaults eligible", ({ channelId, scenarioIds }) => {
-    expect(
-      resolveCatalogLiveTransportQaScenarioIds({
-        ...MOCK_LANE,
-        channelId,
-        channelDriver: "live",
-        scenarioIds,
-      }),
-    ).toEqual(scenarioIds);
   });
 
   it("rejects the shared channel canary on unsupported Discord drivers", () => {
@@ -194,7 +107,7 @@ describe("live transport QA scenario selection", () => {
         scenarioIds: ["channel-canary"],
       }),
     ).toThrow(
-      "selected QA scenario(s) do not match the current QA lane: channel-canary (channel=qa-channel|telegram|buzz|msteams)",
+      "selected QA scenario(s) do not match the current QA lane: channel-canary (channel=qa-channel)",
     );
   });
 });
